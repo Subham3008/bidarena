@@ -312,14 +312,25 @@ function registerRoomHandlers(io, socket, presenceStore, bidQueue) {
     let result
 
     try {
-      result = await bidQueue.enqueue(auctionId, () =>
-        processBid({
+      result = await bidQueue.enqueue(auctionId, async () => {
+        const acceptedBid = await processBid({
           auctionId,
           bidderId: socket.data.user.id,
           amount: payload.amount,
           clientBidId: payload.clientBidId,
-        }),
-      )
+        })
+
+        // The room update stays inside the queue and happens only after commit.
+        io.to(roomName(auctionId)).emit('auction_state_updated', {
+          auctionId,
+          auction: acceptedBid.auction,
+          latestBid: acceptedBid.latestBid,
+          timelineEvent: acceptedBid.timelineEvent,
+          serverTime: Date.now(),
+        })
+
+        return acceptedBid
+      })
     } catch (error) {
       const message =
         error instanceof BidRejectedError
@@ -329,18 +340,6 @@ function registerRoomHandlers(io, socket, presenceStore, bidQueue) {
       return
     }
 
-    const serverTime = Date.now()
-
-    // Persistence has committed before this authoritative room broadcast.
-    io.to(roomName(auctionId)).emit('auction_state_updated', {
-      auctionId,
-      currentBid: result.auction.currentBid,
-      currentBidder: result.auction.currentBidder,
-      bidCount: result.auction.bidCount,
-      sequence: result.auction.sequence,
-      latestAcceptedBid: result.bid,
-      serverTime,
-    })
     success(acknowledge, result)
   })
 

@@ -56,12 +56,13 @@ describe('deterministic live bid processing', () => {
     await mongoServer.stop()
   })
 
-  async function createUser(displayName) {
+  async function createUser(displayName, overrides = {}) {
     userNumber += 1
     return User.create({
       displayName,
       email: `bid-user-${userNumber}@example.com`,
       passwordHash: 'stored-password-hash',
+      ...overrides,
     })
   }
 
@@ -113,14 +114,24 @@ describe('deterministic live bid processing', () => {
     })
   }
 
-  it('accepts a valid bid', async () => {
+  it('broadcasts an accepted bid to every socket in the auction room', async () => {
     const seller = await createUser('Seller One')
     const bidder = await createUser('Bidder One')
+    const observer = await createUser('Observer One')
     const auction = await createAuction(seller)
-    const client = await connectUser(bidder)
-    await joinBidder(client, auction.id)
-    const updatePromise = new Promise((resolve) => {
+    const [client, observerClient] = await Promise.all([
+      connectUser(bidder),
+      connectUser(observer),
+    ])
+    await Promise.all([
+      joinBidder(client, auction.id),
+      joinBidder(observerClient, auction.id),
+    ])
+    const senderUpdatePromise = new Promise((resolve) => {
       client.once('auction_state_updated', resolve)
+    })
+    const observerUpdatePromise = new Promise((resolve) => {
+      observerClient.once('auction_state_updated', resolve)
     })
 
     const acknowledgement = await emitWithAck(client, 'place_bid', {
@@ -128,7 +139,10 @@ describe('deterministic live bid processing', () => {
       amount: 1100,
       clientBidId: 'valid-bid-1',
     })
-    const update = await updatePromise
+    const [senderUpdate, observerUpdate] = await Promise.all([
+      senderUpdatePromise,
+      observerUpdatePromise,
+    ])
     const [storedAuction, storedBid, timelineEvent] = await Promise.all([
       Auction.findById(auction.id),
       Bid.findOne({ auction: auction.id }),
@@ -138,26 +152,120 @@ describe('deterministic live bid processing', () => {
     expect(acknowledgement.success).toBe(true)
     expect(acknowledgement.data.bid).toMatchObject({
       amount: 1100,
-      bidder: bidder.id,
+      bidder: {
+        id: bidder.id,
+        name: 'Bidder One',
+        avatarUrl: null,
+      },
       serverSequence: 1,
     })
     expect(acknowledgement.data.auction).toMatchObject({
       currentBid: 1100,
-      currentBidder: bidder.id,
+      currentBidder: {
+        id: bidder.id,
+        name: 'Bidder One',
+        avatarUrl: null,
+      },
       bidCount: 1,
       sequence: 1,
       version: 1,
     })
-    expect(update).toMatchObject({
+    expect(senderUpdate).toEqual(observerUpdate)
+    expect(observerUpdate).toMatchObject({
       auctionId: auction.id,
-      currentBid: 1100,
-      currentBidder: bidder.id,
-      bidCount: 1,
-      sequence: 1,
+      auction: {
+        id: auction.id,
+        status: 'ACTIVE',
+        currentBid: 1100,
+        currentBidder: { id: bidder.id, name: 'Bidder One' },
+        bidCount: 1,
+        sequence: 1,
+      },
+      latestBid: {
+        amount: 1100,
+        sequence: 1,
+        bidder: { id: bidder.id, name: 'Bidder One' },
+      },
+      timelineEvent: {
+        type: 'BID_ACCEPTED',
+        actor: { id: bidder.id, name: 'Bidder One' },
+      },
+      serverTime: expect.any(Number),
     })
     expect(storedAuction.currentBid).toBe(1100)
     expect(storedBid.serverSequence).toBe(1)
     expect(timelineEvent.metadata.bidSequence).toBe(1)
+  })
+
+  it('does not broadcast an accepted bid into another auction room', async () => {
+    const [sellerA, sellerB, bidder, observer] = await Promise.all([
+      createUser('Seller Room A'),
+      createUser('Seller Room B'),
+      createUser('Bidder Room A'),
+      createUser('Observer Room B'),
+    ])
+    const [auctionA, auctionB] = await Promise.all([
+      createAuction(sellerA),
+      createAuction(sellerB),
+    ])
+    const [bidderClient, observerClient] = await Promise.all([
+      connectUser(bidder),
+      connectUser(observer),
+    ])
+    await Promise.all([
+      joinBidder(bidderClient, auctionA.id),
+      joinBidder(observerClient, auctionB.id),
+    ])
+    let crossedRooms = false
+    observerClient.on('auction_state_updated', (update) => {
+      crossedRooms ||= update.auctionId === auctionA.id
+    })
+    const acceptedUpdate = new Promise((resolve) => {
+      bidderClient.once('auction_state_updated', resolve)
+    })
+
+    const acknowledgement = await emitWithAck(bidderClient, 'place_bid', {
+      auctionId: auctionA.id,
+      amount: 1100,
+      clientBidId: 'isolated-bid-1',
+    })
+    await acceptedUpdate
+    await new Promise((resolve) => setTimeout(resolve, 25))
+
+    expect(acknowledgement.success).toBe(true)
+    expect(crossedRooms).toBe(false)
+  })
+
+  it('includes the safe bidder identity in an accepted bid payload', async () => {
+    const seller = await createUser('Identity Seller')
+    const bidder = await createUser('Identity Bidder', {
+      avatar: 'https://example.com/bidder.png',
+    })
+    const auction = await createAuction(seller)
+    const client = await connectUser(bidder)
+    await joinBidder(client, auction.id)
+    const updatePromise = new Promise((resolve) => {
+      client.once('auction_state_updated', resolve)
+    })
+
+    await emitWithAck(client, 'place_bid', {
+      auctionId: auction.id,
+      amount: 1100,
+      clientBidId: 'identity-bid-1',
+    })
+    const update = await updatePromise
+
+    expect(update.latestBid.bidder).toEqual({
+      id: bidder.id,
+      name: 'Identity Bidder',
+      avatarUrl: 'https://example.com/bidder.png',
+    })
+    expect(update.timelineEvent.actor).toMatchObject({
+      id: bidder.id,
+      name: 'Identity Bidder',
+    })
+    expect(update.latestBid.bidder).not.toHaveProperty('email')
+    expect(update.latestBid.bidder).not.toHaveProperty('passwordHash')
   })
 
   it('rejects a bid below the authoritative minimum', async () => {
@@ -210,6 +318,10 @@ describe('deterministic live bid processing', () => {
     const auction = await createAuction(seller)
     const client = await connectUser(bidder)
     await joinBidder(client, auction.id)
+    let acceptedUpdateCount = 0
+    client.on('auction_state_updated', () => {
+      acceptedUpdateCount += 1
+    })
 
     const first = await emitWithAck(client, 'place_bid', {
       auctionId: auction.id,
@@ -221,6 +333,7 @@ describe('deterministic live bid processing', () => {
       amount: 1200,
       clientBidId: 'duplicate-bid-1',
     })
+    await new Promise((resolve) => setTimeout(resolve, 25))
     const storedAuction = await Auction.findById(auction.id)
 
     expect(first.success).toBe(true)
@@ -240,6 +353,7 @@ describe('deterministic live bid processing', () => {
       bidCount: 1,
       sequence: 1,
     })
+    expect(acceptedUpdateCount).toBe(1)
   })
 
   it('orders two concurrent bids with sequential server sequences', async () => {

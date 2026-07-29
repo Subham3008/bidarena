@@ -207,4 +207,102 @@ describe('Socket.io auction rooms', () => {
     expect(snapshotB.currentUserRole).toBe('SPECTATOR')
     expect(clientBReceivedAuctionAEvent).toBe(false)
   })
+
+  it('restores enriched persisted winner and bid state after reconnect', async () => {
+    const winner = await User.create({
+      displayName: 'Reconnect Winner',
+      email: 'reconnect-winner@example.com',
+      avatar: 'https://example.com/reconnect-winner.png',
+      passwordHash: 'stored-password-hash',
+    })
+    const auction = await createAuction({
+      status: 'COMPLETED',
+      currentBid: 1700,
+      currentBidder: winner.id,
+      winner: winner.id,
+      winningAmount: 1700,
+      bidCount: 1,
+      sequence: 1,
+      timelineSequence: 3,
+    })
+    await Bid.create({
+      auction: auction.id,
+      bidder: winner.id,
+      amount: 1700,
+      clientBidId: 'reconnect-bid-1',
+      serverSequence: 1,
+    })
+    await Timeline.insertMany([
+      {
+        auction: auction.id,
+        eventType: 'BID_ACCEPTED',
+        actor: winner.id,
+        sequence: 1,
+        metadata: { amount: 1700, bidSequence: 1 },
+      },
+      {
+        auction: auction.id,
+        eventType: 'AUCTION_COMPLETED',
+        sequence: 2,
+        metadata: { finalBid: 1700 },
+      },
+      {
+        auction: auction.id,
+        eventType: 'WINNER_DECLARED',
+        actor: winner.id,
+        sequence: 3,
+        metadata: { winningBid: 1700 },
+      },
+    ])
+
+    async function connectAndLoadSnapshot() {
+      const client = await connectClient()
+      const snapshotPromise = new Promise((resolve) => {
+        client.once('auction_snapshot', resolve)
+      })
+      await emitWithAck(client, 'join_auction', {
+        auctionId: auction.id,
+        mode: 'SPECTATOR',
+      })
+      return { client, snapshot: await snapshotPromise }
+    }
+
+    const firstConnection = await connectAndLoadSnapshot()
+    firstConnection.client.disconnect()
+    const reconnected = await connectAndLoadSnapshot()
+
+    expect(reconnected.snapshot.auction).toMatchObject({
+      id: auction.id,
+      status: 'COMPLETED',
+      currentBid: 1700,
+      currentBidder: { id: winner.id, name: 'Reconnect Winner' },
+      winner: { id: winner.id, name: 'Reconnect Winner' },
+      winningAmount: 1700,
+      bidCount: 1,
+      sequence: 1,
+    })
+    expect(reconnected.snapshot.latestBids[0]).toMatchObject({
+      amount: 1700,
+      sequence: 1,
+      bidder: {
+        id: winner.id,
+        name: 'Reconnect Winner',
+        avatarUrl: 'https://example.com/reconnect-winner.png',
+      },
+    })
+    expect(reconnected.snapshot.timeline.at(-1)).toMatchObject({
+      type: 'WINNER_DECLARED',
+      winner: { id: winner.id, name: 'Reconnect Winner' },
+    })
+    expect(reconnected.snapshot.auction).toEqual(
+      firstConnection.snapshot.auction,
+    )
+    expect(reconnected.snapshot.latestBids).toEqual(
+      firstConnection.snapshot.latestBids,
+    )
+    expect(reconnected.snapshot.timeline).toEqual(
+      firstConnection.snapshot.timeline,
+    )
+    expect(reconnected.snapshot.serverTime).toEqual(expect.any(Number))
+  })
 })

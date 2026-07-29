@@ -1,59 +1,19 @@
 import Auction from '../models/auction.model.js'
 import Bid from '../models/bid.model.js'
 import Timeline from '../models/timeline.model.js'
-
-function toId(value) {
-  return value ? value.toString() : null
-}
-
-function serializeAuction(auction) {
-  return {
-    id: toId(auction._id),
-    seller: toId(auction.seller),
-    title: auction.title,
-    description: auction.description,
-    image: auction.image,
-    startBid: auction.startBid,
-    minimumIncrement: auction.minimumIncrement,
-    currentBid: auction.currentBid,
-    currentBidder: toId(auction.currentBidder),
-    startAt: auction.startAt,
-    endAt: auction.endAt,
-    status: auction.status,
-    winner: toId(auction.winner),
-    winningAmount: auction.winningAmount ?? null,
-    bidCount: auction.bidCount,
-    sequence: auction.sequence,
-    paymentStatus: auction.paymentStatus,
-    createdAt: auction.createdAt,
-    updatedAt: auction.updatedAt,
-  }
-}
-
-function serializeBid(bid) {
-  return {
-    id: toId(bid._id),
-    bidder: toId(bid.bidder),
-    amount: bid.amount,
-    clientBidId: bid.clientBidId,
-    serverSequence: bid.serverSequence,
-    timestamp: bid.timestamp,
-  }
-}
-
-function serializeTimelineEvent(event) {
-  return {
-    id: toId(event._id),
-    eventType: event.eventType,
-    actor: toId(event.actor),
-    sequence: event.sequence,
-    metadata: event.metadata,
-    timestamp: event.timestamp,
-  }
-}
+import {
+  serializeAuctionState,
+  serializeBidState,
+  serializeTimelineState,
+} from './auction-payload.service.js'
 
 export async function loadAuctionSnapshotData(auctionId) {
-  const auction = await Auction.findById(auctionId).lean()
+  const auction = await Auction.findById(auctionId)
+    .populate([
+      { path: 'currentBidder', select: '_id displayName avatar' },
+      { path: 'winner', select: '_id displayName avatar' },
+    ])
+    .lean()
 
   if (!auction) {
     return null
@@ -63,16 +23,18 @@ export async function loadAuctionSnapshotData(auctionId) {
     Bid.find({ auction: auctionId })
       .sort({ serverSequence: -1 })
       .limit(20)
+      .populate('bidder', '_id displayName avatar')
       .lean(),
     Timeline.find({ auction: auctionId })
       .sort({ sequence: -1 })
       .limit(50)
+      .populate('actor', '_id displayName avatar')
       .lean(),
   ])
 
   return {
-    auction: serializeAuction(auction),
-    latestBids: latestBids.reverse().map(serializeBid),
-    timeline: timeline.reverse().map(serializeTimelineEvent),
+    auction: serializeAuctionState(auction),
+    latestBids: latestBids.reverse().map(serializeBidState),
+    timeline: timeline.reverse().map(serializeTimelineState),
   }
 }

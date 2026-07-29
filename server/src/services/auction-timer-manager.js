@@ -5,6 +5,7 @@ import {
   completeAuction,
   recoverAuctionState,
 } from './auction-lifecycle.service.js'
+import { loadCompletedAuctionState } from './auction-payload.service.js'
 
 const MAX_TIMEOUT_MS = 2_147_000_000
 const RETRY_DELAY_MS = 1_000
@@ -40,6 +41,7 @@ export function createAuctionTimerManager(io, { syncIntervalMs = 1_000 } = {}) {
   const startTasks = new Map()
   const endTasks = new Map()
   const inFlightTasks = new Set()
+  const completionBroadcasts = new Map()
   let stopped = false
 
   function clearHandle(handles, auctionId, clearHandle) {
@@ -135,20 +137,60 @@ export function createAuctionTimerManager(io, { syncIntervalMs = 1_000 } = {}) {
     })
   }
 
-  function emitCompleted(auction) {
+  async function emitCompleted(auctionId) {
     if (stopped) {
-      return
+      return false
     }
 
-    const auctionId = auction.id
-    io.to(auctionRoom(auctionId)).emit('auction_completed', {
-      auctionId,
-      status: 'COMPLETED',
-      winner: auction.winner ? { id: auction.winner.toString() } : null,
-      winningAmount: auction.winningAmount ?? null,
-      bidCount: auction.bidCount,
-      serverTime: Date.now(),
-    })
+    const existingBroadcast = completionBroadcasts.get(auctionId)
+
+    if (existingBroadcast) {
+      return existingBroadcast
+    }
+
+    const broadcast = (async () => {
+      const state = await loadCompletedAuctionState(auctionId)
+
+      if (!state || stopped) {
+        return false
+      }
+
+      const serverTime = Date.now()
+      const authoritativeUpdate = {
+        auctionId,
+        auction: state.auction,
+        timelineEvent: state.timelineEvent,
+        serverTime,
+      }
+
+      io.to(auctionRoom(auctionId)).emit('auction_completed', {
+        ...authoritativeUpdate,
+        status: state.auction.status,
+        winner: state.auction.winner,
+        winningAmount: state.auction.winningAmount,
+        bidCount: state.auction.bidCount,
+      })
+      io.to(auctionRoom(auctionId)).emit(
+        'auction_state_updated',
+        authoritativeUpdate,
+      )
+      return true
+    })()
+
+    completionBroadcasts.set(auctionId, broadcast)
+
+    try {
+      const didBroadcast = await broadcast
+
+      if (!didBroadcast) {
+        completionBroadcasts.delete(auctionId)
+      }
+
+      return didBroadcast
+    } catch (error) {
+      completionBroadcasts.delete(auctionId)
+      throw error
+    }
   }
 
   function emitTimerSync(auction) {
@@ -227,7 +269,12 @@ export function createAuctionTimerManager(io, { syncIntervalMs = 1_000 } = {}) {
 
         if (result.completed) {
           clearAuction(auctionId)
-          emitCompleted(result.completed)
+          const didBroadcast = await emitCompleted(auctionId)
+
+          if (!didBroadcast && !stopped) {
+            throw new Error('Completed auction state is temporarily unavailable')
+          }
+
           return
         }
 
@@ -236,7 +283,9 @@ export function createAuctionTimerManager(io, { syncIntervalMs = 1_000 } = {}) {
           return
         }
 
-        await reconcileAuction(auctionId)
+        if (!(await emitCompleted(auctionId))) {
+          await reconcileAuction(auctionId)
+        }
       },
       () => retryStart(auctionId),
     )
@@ -256,7 +305,17 @@ export function createAuctionTimerManager(io, { syncIntervalMs = 1_000 } = {}) {
 
         if (auction) {
           clearAuction(auctionId)
-          emitCompleted(auction)
+          const didBroadcast = await emitCompleted(auctionId)
+
+          if (!didBroadcast && !stopped) {
+            throw new Error('Completed auction state is temporarily unavailable')
+          }
+
+          return
+        }
+
+        if (await emitCompleted(auctionId)) {
+          clearAuction(auctionId)
           return
         }
 

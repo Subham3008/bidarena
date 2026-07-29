@@ -152,14 +152,19 @@ describe('authoritative auction lifecycle timers', () => {
   })
 
   it('finalises the persisted highest bidder as winner', async () => {
-    const winner = new mongoose.Types.ObjectId()
+    const winner = await User.create({
+      displayName: 'Winning Bidder',
+      email: 'winning-bidder@example.com',
+      avatar: 'https://example.com/winner.png',
+      passwordHash: 'stored-password-hash',
+    })
     const auction = await Auction.create(
       auctionData({
         status: 'ACTIVE',
         startAt: new Date(Date.now() - 1_000),
         endAt: new Date(Date.now() + 75),
         currentBid: 1800,
-        currentBidder: winner,
+        currentBidder: winner.id,
         bidCount: 1,
       }),
     )
@@ -171,22 +176,48 @@ describe('authoritative auction lifecycle timers', () => {
     const completionPromise = new Promise((resolve) => {
       client.once('auction_completed', resolve)
     })
+    const stateUpdatePromise = new Promise((resolve) => {
+      client.once('auction_state_updated', resolve)
+    })
 
     timerManager.scheduleAuction(auction)
-    const [completedAuction, completion] = await Promise.all([
+    const [completedAuction, completion, stateUpdate] = await Promise.all([
       waitForAuctionStatus(auction.id, 'COMPLETED'),
       completionPromise,
+      stateUpdatePromise,
     ])
 
-    expect(completedAuction.winner).toEqual(winner)
+    expect(completedAuction.winner).toEqual(winner._id)
     expect(completedAuction.winningAmount).toBe(1800)
     expect(completedAuction.currentBid).toBe(1800)
     expect(completion).toMatchObject({
       auctionId: auction.id,
       status: 'COMPLETED',
-      winner: { id: winner.toString() },
+      winner: {
+        id: winner.id,
+        name: 'Winning Bidder',
+        avatarUrl: 'https://example.com/winner.png',
+      },
       winningAmount: 1800,
       bidCount: 1,
+      auction: {
+        id: auction.id,
+        status: 'COMPLETED',
+        winner: { id: winner.id, name: 'Winning Bidder' },
+        winningAmount: 1800,
+      },
+      timelineEvent: {
+        type: 'WINNER_DECLARED',
+        winner: { id: winner.id, name: 'Winning Bidder' },
+      },
+    })
+    expect(stateUpdate).toMatchObject({
+      auctionId: auction.id,
+      auction: {
+        status: 'COMPLETED',
+        winner: { id: winner.id, name: 'Winning Bidder' },
+        winningAmount: 1800,
+      },
     })
   })
 
