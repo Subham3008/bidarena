@@ -1,6 +1,7 @@
 import {
   authenticateUser,
   registerUser,
+  updateUserProfile,
 } from '../services/auth.service.js'
 import {
   assertSessionConfiguration,
@@ -60,5 +61,15 @@ export function getCurrentUser(request, response) {
     data: {
       user: request.user.toSafeObject(),
     },
+  })
+}
+
+export async function updateCurrentUser(request, response) {
+  const user = await updateUserProfile(request.user, request.body)
+
+  response.status(200).json({
+    success: true,
+    message: 'Profile updated successfully',
+    data: { user: user.toSafeObject() },
   })
 }

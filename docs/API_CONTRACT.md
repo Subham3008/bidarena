@@ -3,9 +3,9 @@
 > **Contract status:** Living contract.
 >
 > **Implemented now:** health/readiness, HTTP authentication, auction creation,
-> discovery, and public auction details.
+> discovery, public auction details, profile editing, and seller-owned auctions.
 >
-> Auction, profile, payment, bidding, and chat routes remain planned. Socket.io
+> Payment, bidding, and chat routes remain planned. Socket.io
 > auction rooms and snapshots are implemented.
 
 This document defines the initial HTTP boundary between the BidArena client and
@@ -37,7 +37,8 @@ authorization, persistence, and tests are complete.
 | `POST /api/auctions` | Implemented | Authenticated auction creation. |
 | `GET /api/auctions/:auctionId` | Implemented | Public auction details with a safe seller summary. |
 | `/api/auctions/:auctionId/*` | Planned | History, recovery, and payment. |
-| `/api/users/me/*` | Planned | Current-user profile and history. |
+| `GET/PATCH /api/auth/me` | Implemented | Current-user profile read and safe profile updates. |
+| `GET /api/auctions/mine` | Implemented | Authenticated seller listings, status filters, counts, and pagination. |
 
 ## 3. Representation conventions
 
@@ -354,18 +355,20 @@ snapshot rather than merging guesses into it.
 
 ### 7.4 Current-user views
 
-All routes in this table are **planned and not implemented** and require an
-authenticated principal.
+Profile read/update and seller-owned auction discovery are implemented and
+require an authenticated principal. Bid and winner history remain planned.
 
 | Method | Path | Purpose | Success |
 |---|---|---|---|
-| `GET` | `/api/users/me` | Read the current user's profile. | `200` |
-| `GET` | `/api/users/me/auctions?relationship=created` | Read auctions created by the current user. | `200` |
+| `GET` | `/api/auth/me` | Read the current user's profile. | `200` |
+| `PATCH` | `/api/auth/me` | Update display name, avatar URL, bio, and location. | `200` |
+| `GET` | `/api/auctions/mine` | Read the current seller's auctions with status filters and pagination. | `200` |
 | `GET` | `/api/users/me/auctions?relationship=won` | Read auctions won by the current user. | `200` |
 | `GET` | `/api/users/me/bids` | Read the current user's persisted bid history. | `200` |
 
-Profile editing fields and whether the seller dashboard needs a dedicated
-aggregate endpoint are unresolved. No update route is frozen yet.
+The profile update rejects email, password, role, permission, and authentication
+identifier fields. Seller identity for `/api/auctions/mine` always comes from
+the authenticated session.
 
 ### 7.5 Winner payment
 

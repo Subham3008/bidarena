@@ -27,16 +27,26 @@ export function MarketplaceHeader() {
             Browse
           </NavLink>
           {user ? (
-            <NavLink to="/auctions/new" className={navClassName}>
-              Create
-            </NavLink>
+            <>
+              <NavLink to="/dashboard" className={navClassName}>
+                Dashboard
+              </NavLink>
+              <NavLink
+                to="/auctions/new"
+                className={({ isActive }) =>
+                  `${navClassName({ isActive })} hidden sm:block`
+                }
+              >
+                Create
+              </NavLink>
+            </>
           ) : null}
           {!isRestoringSession ? (
             <NavLink
-              to={user ? '/account' : '/login'}
+              to={user ? '/profile' : '/login'}
               className={navClassName}
             >
-              {user ? 'Account' : 'Sign in'}
+              {user ? 'Profile' : 'Sign in'}
             </NavLink>
           ) : null}
         </nav>

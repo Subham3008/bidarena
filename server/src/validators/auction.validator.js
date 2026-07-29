@@ -58,6 +58,12 @@ export const discoverAuctionsSchema = z.object({
     .default('newest'),
 })
 
+export const mineAuctionsSchema = z.object({
+  status: z.enum(['UPCOMING', 'ACTIVE', 'COMPLETED']).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(48).default(12),
+})
+
 export const auctionParamsSchema = z.object({
   auctionId: z
     .string()

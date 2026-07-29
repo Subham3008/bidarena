@@ -95,7 +95,10 @@ export function CreateAuctionPage() {
         startAt: new Date(values.startAt).toISOString(),
         endAt: new Date(values.endAt).toISOString(),
       })
-      await queryClient.invalidateQueries({ queryKey: ['auctions'] })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['auctions'] }),
+        queryClient.invalidateQueries({ queryKey: ['my-auctions'] }),
+      ])
       reset()
       toast.success('Auction created successfully')
       navigate('/auctions')
