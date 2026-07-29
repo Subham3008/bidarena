@@ -2,9 +2,10 @@
 
 > **Contract status:** Living contract.
 >
-> **Implemented now:** health/readiness and HTTP authentication routes.
+> **Implemented now:** health/readiness, HTTP authentication, auction creation,
+> and auction discovery.
 >
-> Auction, profile, payment, and Socket.IO routes remain planned.
+> Auction details, profiles, payment, and Socket.IO routes remain planned.
 
 This document defines the initial HTTP boundary between the BidArena client and
 server. It is a contract, not evidence that a feature exists. A planned route
@@ -13,8 +14,7 @@ authorization, persistence, and tests are complete.
 
 ## 1. Scope and versioning
 
-- Authentication routes use `/api/auth`; future marketplace routes use
-  `/api/v1`.
+- Product HTTP routes use the `/api` prefix.
 - The infrastructure health check remains unversioned at `/health`.
 - JSON request and response fields use `camelCase`.
 - Request and response bodies use `application/json`, except for an image upload
@@ -31,9 +31,10 @@ authorization, persistence, and tests are complete.
 | `GET /health` | Implemented foundation endpoint | No database, Redis, or external-service readiness is implied. |
 | `GET /ready` | Implemented foundation endpoint | Reports MongoDB readiness. |
 | `/api/auth/*` | Implemented | HTTP-only JWT cookie authentication and session restoration. |
-| `/api/v1/auctions/*` | Planned | Marketplace, details, history, and recovery reads. |
-| `/api/v1/users/me/*` | Planned | Current-user profile and history. |
-| `/api/v1/auctions/:auctionId/payment/*` | Planned | Winner-only Razorpay test-mode flow. |
+| `GET /api/auctions` | Implemented | Public discovery, filtering, sorting, and pagination. |
+| `POST /api/auctions` | Implemented | Authenticated auction creation. |
+| `/api/auctions/:auctionId/*` | Planned | Details, history, recovery, and payment. |
+| `/api/users/me/*` | Planned | Current-user profile and history. |
 | Socket.io auction commands and events | Planned | Defined separately; none are implemented by this document. |
 
 ## 3. Representation conventions
@@ -148,8 +149,7 @@ fields and enrich the response only after successful authentication.
   control flow.
 - `data` contains the operation result and may be omitted only when no result is
   needed, as in the minimal health response.
-- A list response may add a `meta` object after its pagination strategy is
-  frozen.
+- Auction discovery returns pagination beside `auctions` inside `data`.
 
 ### 5.2 Failed request
 
@@ -265,20 +265,21 @@ session behavior remain future decisions.
 
 ### 7.3 Auction marketplace and recovery
 
-All routes in this table are **planned and not implemented**.
+Creation and discovery are implemented. Detail, snapshot, bid-history, and
+timeline routes remain planned.
 
 | Method | Path | Auth | Purpose | Success |
 |---|---|---|---|---|
-| `GET` | `/api/v1/auctions` | Optional | Discover auctions and filter by SRS lifecycle status. | `200` |
-| `POST` | `/api/v1/auctions` | Required | Create an auction owned by the current user. | `201` |
-| `GET` | `/api/v1/auctions/:auctionId` | Optional | Get public auction details and viewer-safe state. | `200` |
-| `GET` | `/api/v1/auctions/:auctionId/snapshot` | Optional | Fetch authoritative recovery state outside Socket.io. | `200` |
-| `GET` | `/api/v1/auctions/:auctionId/bids` | Optional | Read persisted bid history. | `200` |
-| `GET` | `/api/v1/auctions/:auctionId/timeline` | Optional | Read persisted auction timeline entries. | `200` |
+| `GET` | `/api/auctions` | None | Discover auctions with filters, sorting, and pagination. | `200` |
+| `POST` | `/api/auctions` | Required | Create an auction owned by the current user. | `201` |
+| `GET` | `/api/auctions/:auctionId` | Optional | Get public auction details and viewer-safe state. | `200` |
+| `GET` | `/api/auctions/:auctionId/snapshot` | Optional | Fetch authoritative recovery state outside Socket.io. | `200` |
+| `GET` | `/api/auctions/:auctionId/bids` | Optional | Read persisted bid history. | `200` |
+| `GET` | `/api/auctions/:auctionId/timeline` | Optional | Read persisted auction timeline entries. | `200` |
 
-Initial discovery filters are `status=UPCOMING|ACTIVE|COMPLETED` and a text
-search term. Exact search fields, sorting, page size limits, and cursor-versus-
-page pagination remain unresolved.
+Discovery accepts `status=UPCOMING|ACTIVE|COMPLETED`, a title `search`,
+`page` (default 1), `limit` (default 12, maximum 48), and `sort` values
+`newest`, `endingSoon`, `priceLow`, or `priceHigh`.
 
 Representative create request:
 
@@ -286,44 +287,36 @@ Representative create request:
 {
   "title": "Mechanical Keyboard",
   "description": "Seller-provided auction description",
-  "imageRefs": ["uploaded_image_reference"],
-  "currency": "INR",
-  "startingBid": 100000,
+  "image": "https://example.invalid/image.jpg",
+  "startBid": 100000,
   "minimumIncrement": 5000,
   "startAt": "2026-08-01T12:00:00.000Z",
   "endAt": "2026-08-01T12:30:00.000Z"
 }
 ```
 
-The example currency is illustrative. Upload transport, accepted image formats,
-image limits, supported currencies, scheduling constraints, and the exact
-minimum-bid policy must be frozen before implementation.
+The sprint accepts a validated image URL. Upload transport and image lifecycle
+remain future work.
 
 Representative auction projection:
 
 ```json
 {
-  "id": "auction_opaque_id",
+  "_id": "auction_opaque_id",
   "title": "Mechanical Keyboard",
   "description": "Seller-provided auction description",
-  "imageUrls": ["https://example.invalid/image"],
+  "image": "https://example.invalid/image.jpg",
   "seller": {
-    "id": "user_opaque_id",
-    "displayName": "Asha Rao"
+    "_id": "user_opaque_id",
+    "name": "Asha Rao"
   },
-  "currency": "INR",
   "status": "ACTIVE",
   "startAt": "2026-08-01T12:00:00.000Z",
   "endAt": "2026-08-01T12:30:00.000Z",
-  "startingBid": 100000,
-  "highestBid": 120000,
-  "minimumNextBid": 125000,
-  "highestBidder": {
-    "id": "user_opaque_id",
-    "displayName": "Visible bidder name"
-  },
-  "winner": null,
-  "paymentStatus": "PENDING",
+  "startBid": 100000,
+  "currentBid": 100000,
+  "minimumIncrement": 5000,
+  "bidCount": 0,
   "createdAt": "2026-07-30T09:00:00.000Z",
   "updatedAt": "2026-08-01T12:10:00.000Z"
 }
@@ -364,10 +357,10 @@ authenticated principal.
 
 | Method | Path | Purpose | Success |
 |---|---|---|---|
-| `GET` | `/api/v1/users/me` | Read the current user's profile. | `200` |
-| `GET` | `/api/v1/users/me/auctions?relationship=created` | Read auctions created by the current user. | `200` |
-| `GET` | `/api/v1/users/me/auctions?relationship=won` | Read auctions won by the current user. | `200` |
-| `GET` | `/api/v1/users/me/bids` | Read the current user's persisted bid history. | `200` |
+| `GET` | `/api/users/me` | Read the current user's profile. | `200` |
+| `GET` | `/api/users/me/auctions?relationship=created` | Read auctions created by the current user. | `200` |
+| `GET` | `/api/users/me/auctions?relationship=won` | Read auctions won by the current user. | `200` |
+| `GET` | `/api/users/me/bids` | Read the current user's persisted bid history. | `200` |
 
 Profile editing fields and whether the seller dashboard needs a dedicated
 aggregate endpoint are unresolved. No update route is frozen yet.
@@ -380,9 +373,9 @@ persisted auction winner.
 
 | Method | Path | Purpose | Success |
 |---|---|---|---|
-| `GET` | `/api/v1/auctions/:auctionId/payment` | Read viewer-authorized payment status. | `200` |
-| `POST` | `/api/v1/auctions/:auctionId/payment/order` | Create a Razorpay test order for the verified winner. | `201` |
-| `POST` | `/api/v1/auctions/:auctionId/payment/verify` | Verify provider IDs and signature on the backend. | `200` |
+| `GET` | `/api/auctions/:auctionId/payment` | Read viewer-authorized payment status. | `200` |
+| `POST` | `/api/auctions/:auctionId/payment/order` | Create a Razorpay test order for the verified winner. | `201` |
+| `POST` | `/api/auctions/:auctionId/payment/verify` | Verify provider IDs and signature on the backend. | `200` |
 
 Representative order response:
 
@@ -417,25 +410,25 @@ Provider secrets and signatures are never broadcast to the auction room.
 
 ## 8. List responses
 
-Until pagination is frozen, list data is consistently nested under a plural
-resource key:
+Auction discovery uses page-number pagination:
 
 ```json
 {
   "success": true,
-  "message": "Auctions retrieved",
+  "message": "Auctions fetched successfully",
   "data": {
-    "auctions": []
-  },
-  "meta": {
-    "pagination": {}
+    "auctions": [],
+    "pagination": {
+      "page": 1,
+      "limit": 12,
+      "totalItems": 0,
+      "totalPages": 0
+    }
   }
 }
 ```
 
-The empty pagination object is documentation shorthand only, not an implemented
-shape. Page-number versus cursor pagination, limits, totals, and stable sort keys
-must be resolved before list endpoints are implemented.
+An empty result remains a successful response with the same pagination shape.
 
 ## 9. State, idempotency, and side effects
 
@@ -463,8 +456,10 @@ rather than being invented in implementation:
 3. Monetary unit/precision, whether to adopt the proposed integer-minor-unit
    representation, and the supported/default currency.
 4. Auction image upload route, limits, and Cloudinary reference lifecycle.
-5. Exact auction creation constraints and minimum-next-bid formula.
-6. Search fields, sort options, pagination strategy, and maximum page size.
+5. Additional auction creation constraints and the future minimum-next-bid
+   formula.
+6. Discovery options beyond title search, the four implemented sort modes, and
+   page-number pagination.
 7. Bidder identity visibility and masking.
 8. Timeline entry type registry and public payloads.
 9. Statistics and auction-heat formulas and response shapes.

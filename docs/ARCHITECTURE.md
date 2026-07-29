@@ -4,7 +4,7 @@
 
 This document defines BidArena's shared architecture boundaries and distinguishes implemented capability from the future product architecture required by `BIDARENA.md`.
 
-The shared foundation provides tooling, contracts, MongoDB startup/readiness, and health checks. The current `subham` increment implements HTTP authentication, cookie-session restoration, and its client UI. Auctions, bidding, timers, Socket.IO workflows, chat, payments, Redis integration, and recovery remain unimplemented.
+The shared foundation provides tooling, contracts, MongoDB startup/readiness, and health checks. The current `subham` work implements HTTP authentication, auction creation/discovery, and their client UX. Auction details, bidding, timers, Socket.IO workflows, chat, payments, Redis integration, and recovery remain unimplemented.
 
 ### Inspection baseline
 
@@ -57,7 +57,7 @@ flowchart LR
     Services --> Payment[Razorpay test integration]
 ```
 
-The diagram shows the intended complete product architecture. Currently live HTTP surfaces are health/readiness and `/api/auth`; Socket.IO and auction-engine paths remain planned.
+The diagram shows the intended complete product architecture. Currently live HTTP surfaces are health/readiness, `/api/auth`, and creation/discovery at `/api/auctions`; Socket.IO and auction-engine paths remain planned.
 
 ## Client boundary
 
@@ -94,6 +94,8 @@ POST /api/auth/register
 POST /api/auth/login
 POST /api/auth/logout
 GET /api/auth/me
+GET /api/auctions
+POST /api/auctions
 ```
 
 with the response:
@@ -238,9 +240,9 @@ Cross-domain features are split by responsibility. For example, the timer compon
 
 ## Current authentication increment boundaries
 
-The current branch implements only HTTP authentication and its client experience. It does not implement or claim completion of:
+The current branch implements HTTP authentication plus auction creation and discovery. It does not implement or claim completion of:
 
-- Auction creation, discovery, filtering, details, or profiles.
+- Auction details, profiles, and seller analytics.
 - Socket.IO authentication, rooms, event handlers, or Redis adapter setup.
 - Bid validation, queues, persistence, statistics, heat, or timelines.
 - Timers, completion, winners, reconnection, or restart recovery.
