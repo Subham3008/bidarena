@@ -45,3 +45,27 @@ export function validateQuery(schema) {
     next()
   }
 }
+
+export function validateParams(schema) {
+  return (request, response, next) => {
+    const result = schema.safeParse(request.params)
+
+    if (!result.success) {
+      response.status(400).json({
+        success: false,
+        message: 'Path validation failed',
+        error: {
+          code: 'VALIDATION_ERROR',
+          details: result.error.issues.map((issue) => ({
+            field: issue.path.join('.'),
+            message: issue.message,
+          })),
+        },
+      })
+      return
+    }
+
+    request.validatedParams = result.data
+    next()
+  }
+}

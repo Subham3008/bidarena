@@ -19,3 +19,8 @@ export async function createAuction(auction) {
   const response = await api.post('/auctions', auction)
   return response.data.data.auction
 }
+
+export async function fetchAuction(auctionId, signal) {
+  const response = await api.get(`/auctions/${auctionId}`, { signal })
+  return response.data.data.auction
+}
