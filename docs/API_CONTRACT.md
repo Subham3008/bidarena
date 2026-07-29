@@ -4,7 +4,8 @@
 >
 > **Implemented now:** health/readiness and HTTP authentication routes.
 >
-> Auction, profile, payment, and Socket.IO routes remain planned.
+> Auction, profile, payment, bidding, and chat routes remain planned. Socket.io
+> auction rooms and snapshots are implemented.
 
 This document defines the initial HTTP boundary between the BidArena client and
 server. It is a contract, not evidence that a feature exists. A planned route
@@ -34,7 +35,7 @@ authorization, persistence, and tests are complete.
 | `/api/v1/auctions/*` | Planned | Marketplace, details, history, and recovery reads. |
 | `/api/v1/users/me/*` | Planned | Current-user profile and history. |
 | `/api/v1/auctions/:auctionId/payment/*` | Planned | Winner-only Razorpay test-mode flow. |
-| Socket.io auction commands and events | Planned | Defined separately; none are implemented by this document. |
+| Socket.io auction rooms and snapshots | Implemented | Optional cookie identity, isolated rooms, snapshots, and presence. |
 
 ## 3. Representation conventions
 
