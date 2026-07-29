@@ -78,6 +78,35 @@ function serializeAuctionDetails(auction) {
   }
 }
 
+function serializeParticipant(user) {
+  if (!user) {
+    return null
+  }
+
+  return {
+    _id: user._id.toString(),
+    name: user.displayName,
+    ...(user.avatar ? { avatar: user.avatar } : {}),
+  }
+}
+
+function serializeOwnedAuction(auction) {
+  return {
+    _id: auction._id.toString(),
+    title: auction.title,
+    image: auction.image,
+    status: auction.status,
+    startAt: auction.startAt,
+    endAt: auction.endAt,
+    startBid: auction.startBid,
+    currentBid: auction.currentBid,
+    bidCount: auction.bidCount,
+    currentBidder: serializeParticipant(auction.currentBidder),
+    winner: serializeParticipant(auction.winner),
+    paymentStatus: auction.paymentStatus,
+  }
+}
+
 export async function createAuction({ sellerId, auctionData }) {
   const now = new Date()
   const status = auctionData.startAt > now ? 'UPCOMING' : 'ACTIVE'
@@ -160,4 +189,46 @@ export async function getAuctionDetails(auctionId) {
   }
 
   return serializeAuctionDetails(auction)
+}
+
+export async function discoverOwnedAuctions({ sellerId, status, page, limit }) {
+  const ownedLifecycleFilter = {
+    seller: sellerId,
+    status: { $in: ['UPCOMING', 'ACTIVE', 'COMPLETED'] },
+  }
+  const filter = status
+    ? { seller: sellerId, status }
+    : ownedLifecycleFilter
+  const skip = (page - 1) * limit
+  const [auctions, totalItems, total, upcoming, active, completed] =
+    await Promise.all([
+      Auction.find(filter)
+        .select(
+          'title image status startAt endAt startBid currentBid bidCount currentBidder winner paymentStatus',
+        )
+        .sort({ createdAt: -1, _id: -1 })
+        .skip(skip)
+        .limit(limit)
+        .populate([
+          { path: 'currentBidder', select: '_id displayName avatar' },
+          { path: 'winner', select: '_id displayName avatar' },
+        ])
+        .lean(),
+      Auction.countDocuments(filter),
+      Auction.countDocuments(ownedLifecycleFilter),
+      Auction.countDocuments({ seller: sellerId, status: 'UPCOMING' }),
+      Auction.countDocuments({ seller: sellerId, status: 'ACTIVE' }),
+      Auction.countDocuments({ seller: sellerId, status: 'COMPLETED' }),
+    ])
+
+  return {
+    auctions: auctions.map(serializeOwnedAuction),
+    summary: { total, upcoming, active, completed },
+    pagination: {
+      page,
+      limit,
+      totalItems,
+      totalPages: Math.ceil(totalItems / limit),
+    },
+  }
 }

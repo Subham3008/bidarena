@@ -122,4 +122,46 @@ describe('auction creation API', () => {
     })
     expect(response.body.data.auction.seller.email).toBeUndefined()
   })
+
+  it('returns only auctions owned by the authenticated seller', async () => {
+    const sellerAgent = request.agent(app)
+    const seller = await sellerAgent.post('/api/auth/register').send({
+      displayName: 'Dashboard Seller',
+      email: 'dashboard-seller@example.com',
+      password: 'password123',
+    })
+    const otherAgent = request.agent(app)
+    const other = await otherAgent.post('/api/auth/register').send({
+      displayName: 'Other Seller',
+      email: 'other-seller@example.com',
+      password: 'password123',
+    })
+    const sharedAuction = {
+      description: 'Seller ownership test auction.',
+      image: 'https://example.com/item.jpg',
+      startBid: 1000,
+      minimumIncrement: 100,
+      startAt: new Date(Date.now() + 60_000),
+      endAt: new Date(Date.now() + 3_600_000),
+    }
+    await Auction.create([
+      {
+        ...sharedAuction,
+        seller: seller.body.data.user.id,
+        title: 'Owned auction',
+      },
+      {
+        ...sharedAuction,
+        seller: other.body.data.user.id,
+        title: 'Another seller auction',
+      },
+    ])
+
+    const response = await sellerAgent.get('/api/auctions/mine')
+
+    expect(response.status).toBe(200)
+    expect(response.body.data.auctions).toHaveLength(1)
+    expect(response.body.data.auctions[0].title).toBe('Owned auction')
+    expect(response.body.data.summary.total).toBe(1)
+  })
 })

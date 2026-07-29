@@ -24,3 +24,16 @@ export async function fetchAuction(auctionId, signal) {
   const response = await api.get(`/auctions/${auctionId}`, { signal })
   return response.data.data.auction
 }
+
+export async function fetchOwnedAuctions(filters, signal) {
+  const response = await api.get('/auctions/mine', {
+    params: {
+      ...(filters.status ? { status: filters.status } : {}),
+      page: filters.page,
+      limit: filters.limit,
+    },
+    signal,
+  })
+
+  return response.data.data
+}

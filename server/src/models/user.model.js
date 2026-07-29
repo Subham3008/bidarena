@@ -17,6 +17,24 @@ const userSchema = new mongoose.Schema(
       trim: true,
       maxlength: 254,
     },
+    avatar: {
+      type: String,
+      trim: true,
+      maxlength: 500,
+      default: '',
+    },
+    bio: {
+      type: String,
+      trim: true,
+      maxlength: 280,
+      default: '',
+    },
+    location: {
+      type: String,
+      trim: true,
+      maxlength: 100,
+      default: '',
+    },
     passwordHash: {
       type: String,
       required: true,
@@ -33,6 +51,9 @@ userSchema.methods.toSafeObject = function toSafeObject() {
     id: this._id.toString(),
     displayName: this.displayName,
     email: this.email,
+    avatar: this.avatar,
+    bio: this.bio,
+    location: this.location,
     createdAt: this.createdAt,
     updatedAt: this.updatedAt,
   }

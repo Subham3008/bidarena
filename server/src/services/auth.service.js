@@ -53,3 +53,9 @@ export async function authenticateUser({ email, password }) {
 
   return user
 }
+
+export async function updateUserProfile(user, profile) {
+  Object.assign(user, profile)
+  await user.save()
+  return user
+}

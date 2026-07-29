@@ -132,4 +132,23 @@ describe('authentication API', () => {
       'passwordHash',
     )
   })
+
+  it('rejects unsafe profile update fields', async () => {
+    const agent = request.agent(app)
+    await agent.post('/api/auth/register').send({
+      displayName: 'Subham',
+      email: 'subham@example.com',
+      password: 'password123',
+    })
+
+    const response = await agent.patch('/api/auth/me').send({
+      email: 'changed@example.com',
+      role: 'ADMIN',
+    })
+    const profile = await agent.get('/api/auth/me')
+
+    expect(response.status).toBe(400)
+    expect(response.body.error.code).toBe('VALIDATION_ERROR')
+    expect(profile.body.data.user.email).toBe('subham@example.com')
+  })
 })

@@ -24,3 +24,29 @@ export const loginSchema = z.object({
   email: emailSchema,
   password: z.string().min(1, 'Password is required'),
 })
+
+export const updateProfileSchema = z
+  .object({
+    displayName: z
+      .string()
+      .trim()
+      .min(2, 'Name must be at least 2 characters')
+      .max(60, 'Name must be at most 60 characters')
+      .optional(),
+    avatar: z
+      .union([
+        z.string().trim().url('Enter a valid avatar URL').max(500),
+        z.literal(''),
+      ])
+      .optional(),
+    bio: z.string().trim().max(280, 'Bio must be at most 280 characters').optional(),
+    location: z
+      .string()
+      .trim()
+      .max(100, 'Location must be at most 100 characters')
+      .optional(),
+  })
+  .strict()
+  .refine((profile) => Object.keys(profile).length > 0, {
+    message: 'Provide at least one profile field',
+  })
