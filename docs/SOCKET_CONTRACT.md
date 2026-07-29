@@ -2,8 +2,8 @@
 
 > **Contract status:** Living contract.
 > **Implemented now:** optional cookie authentication, auction rooms,
-> authoritative snapshots, and in-memory presence. Bid, chat, timer, Redis, and
-> payment events remain planned.
+> authoritative snapshots, in-memory presence, and deterministic bidding. Chat,
+> timer broadcasting, Redis, and payment events remain planned.
 
 This contract defines the initial real-time boundary for auction rooms. The
 backend remains the source of truth. A socket command expresses intent; it does
@@ -111,15 +111,14 @@ Rules:
 
 ## 5. Client-to-server commands
 
-The three room/snapshot commands are implemented. Bid and chat commands remain
-planned.
+The room/snapshot commands and `place_bid` are implemented. Chat remains planned.
 
 | Command | Authentication | Purpose | Acknowledgement data |
 |---|---|---|---|
 | `join_auction` | Optional; required for bidder mode | Validate access, join one auction room, and emit a full snapshot. | `{}` |
 | `leave_auction` | Same socket that joined | Leave an auction room. | `{}` |
 | `request_auction_snapshot` | Joined socket | Emit authoritative room state after a gap or suspected staleness. | `{}` |
-| `place_bid` | Required verified bidder | Enqueue and process one bid intent. | Accepted bid identity and sequence. |
+| `place_bid` | Joined verified bidder | Queue and atomically persist one bid intent. | `{ bid, auction }` |
 | `send_chat_message` | Joined/authorized socket | Submit a room-isolated chat message. | Persisted/accepted chat message. |
 
 ### 5.1 `join_auction`
@@ -196,13 +195,24 @@ Successful acknowledgement:
 ```json
 {
   "success": true,
-  "message": "Bid accepted",
   "data": {
-    "auctionId": "auction_opaque_id",
-    "bidId": "bid_opaque_id",
-    "clientBidId": "unique-client-generated-id",
-    "sequenceNumber": 43,
-    "serverTime": 1785595860000
+    "bid": {
+      "id": "bid_opaque_id",
+      "auctionId": "auction_opaque_id",
+      "bidder": "user_opaque_id",
+      "amount": 125000,
+      "clientBidId": "unique-client-generated-id",
+      "serverSequence": 43,
+      "timestamp": "2026-08-01T12:11:00.000Z"
+    },
+    "auction": {
+      "id": "auction_opaque_id",
+      "currentBid": 125000,
+      "currentBidder": "user_opaque_id",
+      "bidCount": 43,
+      "sequence": 43,
+      "version": 7
+    }
   }
 }
 ```
@@ -212,15 +222,7 @@ Representative rejection:
 ```json
 {
   "success": false,
-  "message": "Bid is below the current minimum",
-  "error": {
-    "code": "BID_BELOW_MINIMUM",
-    "details": {
-      "minimumAmount": 125000,
-      "currency": "INR",
-      "serverTime": 1785595860000
-    }
-  }
+  "message": "Bid must be at least 125000"
 }
 ```
 
@@ -239,8 +241,7 @@ authenticate socket
   -> validate
   -> persist auction, bid, timeline, and sequence atomically
   -> commit
-  -> update Redis cache when configured
-  -> broadcast bid_committed
+  -> broadcast auction_state_updated
   -> acknowledge sender
 ```
 
@@ -267,14 +268,15 @@ changes auction state.
 
 ## 6. Server-to-client events
 
-`auction_snapshot` and `presence_updated` are implemented. Other events below
-remain planned.
+`auction_snapshot`, `presence_updated`, `auction_state_updated`, and
+`bid_rejected` are implemented. Other events below remain planned.
 
 | Event | Audience | Purpose |
 |---|---|---|
 | `auction_snapshot` | One authorized socket | Push a full replacement snapshot during explicit server-led resynchronization. |
 | `auction_started` | Auction room | Announce the authoritative `UPCOMING` to `ACTIVE` transition. |
-| `bid_committed` | Auction room | Publish an accepted, persisted bid and authoritative resulting state. |
+| `auction_state_updated` | Auction room | Publish an accepted bid and authoritative resulting state after commit. |
+| `bid_rejected` | Requesting socket only | Report a rejected bid without room broadcast. |
 | `auction_completed` | Auction room | Publish the one-time persisted completion and winner result. |
 | `presence_updated` | Auction room | Publish active bidder and spectator counts. |
 | `timeline_event_created` | Auction room | Publish a newly persisted public timeline entry. |
@@ -301,28 +303,23 @@ There is deliberately no `timer_tick`, `countdown`, or per-second event.
 Because `currentUserRole` may differ per socket, a full snapshot containing it
 is sent to one socket rather than broadcast unchanged to the whole room.
 
-### 6.2 `bid_committed`
+### 6.2 `auction_state_updated`
 
 ```json
 {
   "auctionId": "auction_opaque_id",
-  "bid": {
+  "currentBid": 125000,
+  "currentBidder": "user_opaque_id",
+  "bidCount": 43,
+  "sequence": 43,
+  "latestAcceptedBid": {
     "id": "bid_opaque_id",
     "clientBidId": "unique-client-generated-id",
     "amount": 125000,
-    "bidder": {
-      "id": "user_opaque_id",
-      "displayName": "Visible bidder name"
-    },
-    "sequenceNumber": 43,
-    "createdAt": "2026-08-01T12:11:00.000Z"
+    "bidder": "user_opaque_id",
+    "serverSequence": 43,
+    "timestamp": "2026-08-01T12:11:00.000Z"
   },
-  "highestBid": 125000,
-  "highestBidder": {
-    "id": "user_opaque_id",
-    "displayName": "Visible bidder name"
-  },
-  "minimumNextBid": 130000,
   "serverTime": 1785595860000
 }
 ```
@@ -393,10 +390,8 @@ and spectators.
 }
 ```
 
-`BID_ACCEPTED` is illustrative. The timeline type registry and per-type
-`publicData` schemas must be frozen before implementation. Private engine,
-payment-provider, and identity data must not be copied into public timeline
-payloads.
+`BID_ACCEPTED` is persisted for every accepted bid. Other timeline types and
+public payload schemas remain separately defined.
 
 ### 6.7 `auction_statistics_updated`
 
@@ -469,20 +464,19 @@ routed through or block the bid queue.
   authoritative auction update, and required timeline record before broadcast.
 - A rejected bid consumes no accepted-bid sequence number.
 - `clientBidId` provides duplicate detection; it is not the authoritative order.
-- Clients apply a `bid_committed` event only if its sequence is newer than the
+- Clients apply an `auction_state_updated` event only if its sequence is newer than the
   last applied bid sequence.
 - A duplicate or older sequence is ignored. A gap triggers
   `request_auction_snapshot`; the client does not invent missing bids.
-- `lastBidSequence` in a snapshot is the authoritative recovery watermark.
+- `auction.sequence` in a snapshot is the authoritative recovery watermark.
 - Sequences are independent across auctions and are never compared globally.
 - The current SRS guarantees sequence numbers for accepted bids only. Whether a
   second persisted `stateVersion` should order completion, payment, presence,
   and other non-bid events is unresolved.
 
-If a bid acknowledgement is lost, retrying the same `clientBidId` may encounter
-`DUPLICATE_BID`. Whether the server returns the original accepted result for such
-a retry is unresolved. Until frozen, the client must request a snapshot rather
-than assuming that timeout or duplication means rejection.
+Retrying the same `clientBidId` is rejected without creating another bid. After
+an acknowledgement timeout, the client requests a snapshot before deciding the
+original outcome.
 
 ## 9. Refresh, reconnection, and stale-state recovery
 
@@ -496,7 +490,7 @@ restore authentication
   -> receive full authoritative snapshot
   -> replace local auction state
   -> derive visual countdown from endAt and serverTime
-  -> resume live event processing from lastBidSequence
+  -> resume live event processing from auction.sequence
 ```
 
 Rules:
@@ -545,14 +539,13 @@ The available SRS does not settle these points:
 1. Socket.io deployment path, transports, and proxy settings.
 2. Public bidder/winner identity masking.
 3. A unified non-bid `stateVersion` and replay strategy.
-4. Duplicate `clientBidId` response semantics after a lost acknowledgement.
-5. Client acknowledgement timeouts, retry backoff, and server rate limits.
-6. Chat limits, history retention, moderation, and post-completion behavior.
-7. Presence disconnect grace periods.
-8. Timeline event registry and public payload schema.
-9. Statistics and auction-heat formulas and payload schema.
-10. Redis cache failure behavior during an otherwise persisted bid.
-11. Payment retry and reconciliation events.
+4. Client acknowledgement timeouts, retry backoff, and server rate limits.
+5. Chat limits, history retention, moderation, and post-completion behavior.
+6. Presence disconnect grace periods.
+7. Timeline event registry and public payload schema.
+8. Statistics and auction-heat formulas and payload schema.
+9. Redis cache failure behavior during an otherwise persisted bid.
+10. Payment retry and reconciliation events.
 
 Both domains must resolve these in the shared contract before implementing
 dependent client and server behavior. Neither side may silently choose a
