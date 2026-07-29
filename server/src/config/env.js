@@ -17,4 +17,5 @@ export const env = Object.freeze({
   host: process.env.HOST ?? '0.0.0.0',
   port: parsePort(process.env.PORT ?? '5000'),
   clientUrl: process.env.CLIENT_URL ?? 'http://localhost:5173',
+  mongodbUri: process.env.MONGODB_URI,
 })
