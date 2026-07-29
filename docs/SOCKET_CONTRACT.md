@@ -5,6 +5,11 @@
 > authoritative snapshots, and in-memory presence. Bid, chat, timer, Redis, and
 > payment events remain planned.
 
+The Domain A auction-room client consumes the implemented snapshot and presence
+events. Its bid control waits for a `place_bid` acknowledgement and never
+updates bid state optimistically; the backend bid command remains pending
+Domain B implementation.
+
 This contract defines the initial real-time boundary for auction rooms. The
 backend remains the source of truth. A socket command expresses intent; it does
 not allow the client to decide bid validity, highest bidder, auction status,

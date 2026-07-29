@@ -57,3 +57,9 @@ export const discoverAuctionsSchema = z.object({
     .enum(['newest', 'endingSoon', 'priceLow', 'priceHigh'])
     .default('newest'),
 })
+
+export const auctionParamsSchema = z.object({
+  auctionId: z
+    .string()
+    .regex(/^[a-f\d]{24}$/i, 'Enter a valid auction ID'),
+})

@@ -3,11 +3,10 @@
 > **Contract status:** Living contract.
 >
 > **Implemented now:** health/readiness, HTTP authentication, auction creation,
-> and auction discovery.
+> discovery, and public auction details.
 >
 > Auction, profile, payment, bidding, and chat routes remain planned. Socket.io
 > auction rooms and snapshots are implemented.
-> Auction details, profiles, payment, and Socket.IO routes remain planned.
 
 This document defines the initial HTTP boundary between the BidArena client and
 server. It is a contract, not evidence that a feature exists. A planned route
@@ -33,15 +32,12 @@ authorization, persistence, and tests are complete.
 | `GET /health` | Implemented foundation endpoint | No database, Redis, or external-service readiness is implied. |
 | `GET /ready` | Implemented foundation endpoint | Reports MongoDB readiness. |
 | `/api/auth/*` | Implemented | HTTP-only JWT cookie authentication and session restoration. |
-| `/api/v1/auctions/*` | Planned | Marketplace, details, history, and recovery reads. |
-| `/api/v1/users/me/*` | Planned | Current-user profile and history. |
-| `/api/v1/auctions/:auctionId/payment/*` | Planned | Winner-only Razorpay test-mode flow. |
 | Socket.io auction rooms and snapshots | Implemented | Optional cookie identity, isolated rooms, snapshots, and presence. |
 | `GET /api/auctions` | Implemented | Public discovery, filtering, sorting, and pagination. |
 | `POST /api/auctions` | Implemented | Authenticated auction creation. |
-| `/api/auctions/:auctionId/*` | Planned | Details, history, recovery, and payment. |
+| `GET /api/auctions/:auctionId` | Implemented | Public auction details with a safe seller summary. |
+| `/api/auctions/:auctionId/*` | Planned | History, recovery, and payment. |
 | `/api/users/me/*` | Planned | Current-user profile and history. |
-| Socket.io auction commands and events | Planned | Defined separately; none are implemented by this document. |
 
 ## 3. Representation conventions
 
@@ -271,14 +267,14 @@ session behavior remain future decisions.
 
 ### 7.3 Auction marketplace and recovery
 
-Creation and discovery are implemented. Detail, snapshot, bid-history, and
-timeline routes remain planned.
+Creation, discovery, and public details are implemented. HTTP snapshot,
+bid-history, and timeline routes remain planned.
 
 | Method | Path | Auth | Purpose | Success |
 |---|---|---|---|---|
 | `GET` | `/api/auctions` | None | Discover auctions with filters, sorting, and pagination. | `200` |
 | `POST` | `/api/auctions` | Required | Create an auction owned by the current user. | `201` |
-| `GET` | `/api/auctions/:auctionId` | Optional | Get public auction details and viewer-safe state. | `200` |
+| `GET` | `/api/auctions/:auctionId` | None | Get public auction details and a safe seller summary. | `200` |
 | `GET` | `/api/auctions/:auctionId/snapshot` | Optional | Fetch authoritative recovery state outside Socket.io. | `200` |
 | `GET` | `/api/auctions/:auctionId/bids` | Optional | Read persisted bid history. | `200` |
 | `GET` | `/api/auctions/:auctionId/timeline` | Optional | Read persisted auction timeline entries. | `200` |

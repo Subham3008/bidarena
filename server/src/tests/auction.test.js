@@ -81,4 +81,45 @@ describe('auction creation API', () => {
       paymentStatus: 'PENDING',
     })
   })
+
+  it('returns public auction details with a safe seller summary', async () => {
+    const agent = request.agent(app)
+    const registration = await agent.post('/api/auth/register').send({
+      displayName: 'Public Seller',
+      email: 'public-seller@example.com',
+      password: 'password123',
+    })
+    const auction = await Auction.create({
+      seller: registration.body.data.user.id,
+      title: 'Studio Headphones',
+      description: 'Closed-back headphones in excellent condition.',
+      image: 'https://example.com/headphones.jpg',
+      startBid: 3000,
+      minimumIncrement: 200,
+      startAt: new Date(Date.now() - 60_000),
+      endAt: new Date(Date.now() + 3_600_000),
+      status: 'ACTIVE',
+    })
+
+    const response = await request(app).get(`/api/auctions/${auction.id}`)
+
+    expect(response.status).toBe(200)
+    expect(response.body).toMatchObject({
+      success: true,
+      message: 'Auction fetched successfully',
+      data: {
+        auction: {
+          _id: auction.id,
+          title: 'Studio Headphones',
+          currentBid: 3000,
+          minimumIncrement: 200,
+          seller: {
+            _id: registration.body.data.user.id,
+            name: 'Public Seller',
+          },
+        },
+      },
+    })
+    expect(response.body.data.auction.seller.email).toBeUndefined()
+  })
 })
