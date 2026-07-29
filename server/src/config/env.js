@@ -18,4 +18,10 @@ export const env = Object.freeze({
   port: parsePort(process.env.PORT ?? '5000'),
   clientUrl: process.env.CLIENT_URL ?? 'http://localhost:5173',
   mongodbUri: process.env.MONGODB_URI,
+  get jwtAccessSecret() {
+    return process.env.JWT_ACCESS_SECRET
+  },
+  get accessTokenExpiry() {
+    return process.env.ACCESS_TOKEN_EXPIRY ?? '15m'
+  },
 })

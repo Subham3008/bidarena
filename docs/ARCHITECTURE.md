@@ -2,9 +2,9 @@
 
 ## Purpose and status
 
-This document defines the shared architecture boundaries for BidArena before feature development begins. It separates the repository state observed during foundation inspection from the future product architecture required by `BIDARENA.md`.
+This document defines BidArena's shared architecture boundaries and distinguishes implemented capability from the future product architecture required by `BIDARENA.md`.
 
-The current phase establishes tooling, structure, contracts, and a minimal server health check. It does not claim that authentication, auctions, bidding, timers, Socket.IO workflows, persistence, chat, payments, or recovery are implemented.
+The shared foundation provides tooling, contracts, MongoDB startup/readiness, and health checks. The current `subham` increment implements HTTP authentication, cookie-session restoration, and its client UI. Auctions, bidding, timers, Socket.IO workflows, chat, payments, Redis integration, and recovery remain unimplemented.
 
 ### Inspection baseline
 
@@ -28,7 +28,7 @@ The accepted foundation for this phase is limited to:
 - Environment examples, ignore rules, npm scripts, linting, and the modular server directories.
 - Architecture, REST, Socket.IO, Git workflow, and SRS traceability documents.
 
-All product behavior described later in this document is a contract or planned design until implementation, testing, integration, and traceability evidence show otherwise.
+Except for the documented foundation and HTTP authentication slice, product behavior described later is planned until implementation, testing, integration, and traceability evidence show otherwise.
 
 ## Architectural principles
 
@@ -57,11 +57,11 @@ flowchart LR
     Services --> Payment[Razorpay test integration]
 ```
 
-The diagram shows the intended product architecture, not the implementation status of the current foundation. The only live HTTP contract required in this phase is `GET /health`.
+The diagram shows the intended complete product architecture. Currently live HTTP surfaces are health/readiness and `/api/auth`; Socket.IO and auction-engine paths remain planned.
 
 ## Client boundary
 
-Domain A, owned by Subham on the future `subham` branch, owns the marketplace and user experience. Planned client areas are:
+Domain A, owned by Subham on `subham`, owns the marketplace and user experience. Client module areas are:
 
 ```text
 client/src/
@@ -85,10 +85,15 @@ Future UI work follows the SRS direction: a neutral background, one controlled a
 
 `app.js` constructs and exports the Express application. It owns application-level middleware and route registration but does not open a network port or start external connections. This keeps the application importable by tests without creating a listening process.
 
-In the shared foundation it exposes only:
+It currently exposes:
 
 ```http
 GET /health
+GET /ready
+POST /api/auth/register
+POST /api/auth/login
+POST /api/auth/logout
+GET /api/auth/me
 ```
 
 with the response:
@@ -102,7 +107,7 @@ with the response:
 
 ### `server/src/server.js`
 
-`server.js` is the process entry point. It loads validated runtime configuration, creates the HTTP server around the Express app, and starts listening. In later Domain B work, this is the composition boundary for Socket.IO, database and Redis lifecycle, recovery startup, and process-level shutdown handling.
+`server.js` is the process entry point. It connects MongoDB before accepting traffic, creates the HTTP server around the Express app, and handles graceful shutdown. In later Domain B work, this remains the composition boundary for Socket.IO, Redis lifecycle, and recovery startup.
 
 Keeping the HTTP server separate from the Express app provides one server that Socket.IO can attach to later while preserving fast HTTP tests against `app.js`.
 
@@ -231,18 +236,16 @@ Every implemented cache must document its value, TTL, invalidation rule, MongoDB
 
 Cross-domain features are split by responsibility. For example, the timer component belongs to Domain A, timer authority belongs to Domain B, and synchronization is verified on `developer`.
 
-## Explicit non-goals of the shared-foundation phase
+## Current authentication increment boundaries
 
-The foundation must not implement or claim completion of:
+The current branch implements only HTTP authentication and its client experience. It does not implement or claim completion of:
 
-- Registration, login, authorization, or session restoration.
 - Auction creation, discovery, filtering, details, or profiles.
 - Socket.IO authentication, rooms, event handlers, or Redis adapter setup.
 - Bid validation, queues, persistence, statistics, heat, or timelines.
 - Timers, completion, winners, reconnection, or restart recovery.
 - Chat, payments, uploads, dashboards, or deployment.
-- MongoDB or Redis production connections.
+- Redis production connections or cache behavior.
 - Stretch goals such as anti-sniping, proxy bidding, recommendations, or moderation.
-- Branch creation, commits, pushes, or merges during the current verification phase.
 
 Feature status is tracked in `SRS_TRACEABILITY.md`. A future requirement is complete only after implementation, relevant tests, cross-domain integration where applicable, documentation, and placement on the correct branch.

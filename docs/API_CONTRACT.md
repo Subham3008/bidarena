@@ -1,8 +1,10 @@
 # BidArena REST API Contract
 
-> **Contract status:** Foundation draft for future implementation.  
-> **Implemented now:** only `GET /health`.  
-> Every `/api/v1` route in this document is **planned and not implemented**.
+> **Contract status:** Living contract.
+>
+> **Implemented now:** health/readiness and HTTP authentication routes.
+>
+> Auction, profile, payment, and Socket.IO routes remain planned.
 
 This document defines the initial HTTP boundary between the BidArena client and
 server. It is a contract, not evidence that a feature exists. A planned route
@@ -11,7 +13,8 @@ authorization, persistence, and tests are complete.
 
 ## 1. Scope and versioning
 
-- Product routes use the `/api/v1` prefix.
+- Authentication routes use `/api/auth`; future marketplace routes use
+  `/api/v1`.
 - The infrastructure health check remains unversioned at `/health`.
 - JSON request and response fields use `camelCase`.
 - Request and response bodies use `application/json`, except for an image upload
@@ -26,7 +29,8 @@ authorization, persistence, and tests are complete.
 | Surface | Status | Notes |
 |---|---|---|
 | `GET /health` | Implemented foundation endpoint | No database, Redis, or external-service readiness is implied. |
-| `/api/v1/auth/*` | Planned | Authentication transport is still an open decision. |
+| `GET /ready` | Implemented foundation endpoint | Reports MongoDB readiness. |
+| `/api/auth/*` | Implemented | HTTP-only JWT cookie authentication and session restoration. |
 | `/api/v1/auctions/*` | Planned | Marketplace, details, history, and recovery reads. |
 | `/api/v1/users/me/*` | Planned | Current-user profile and history. |
 | `/api/v1/auctions/:auctionId/payment/*` | Planned | Winner-only Razorpay test-mode flow. |
@@ -101,9 +105,11 @@ implementing mandatory scope.
 ## 4. Authentication and identity
 
 Protected REST routes require a principal established by authentication
-middleware. The exact credential transport—secure HTTP-only cookie, bearer
-access token, or a documented combination with refresh tokens—has not been
-selected by the available SRS and must be frozen before auth implementation.
+middleware. HTTP authentication uses a signed JWT in the
+`bidarena_session` cookie. The cookie is HTTP-only, uses `SameSite=Lax`, is
+scoped to `/`, and is marked `Secure` in production. The server derives
+identity from the verified JWT subject; it never accepts identity from request
+data.
 
 Regardless of that decision, these rules are fixed:
 
@@ -113,7 +119,7 @@ Regardless of that decision, these rules are fixed:
 3. Request body and query identity fields never override the verified principal.
 4. Seller, bidder, spectator, winner, and payment permissions are derived from
    the verified principal plus authoritative auction data.
-5. Logout and refresh behavior must match the selected credential transport.
+5. Logout clears the session cookie using the same cookie scope.
 6. Authentication failure uses `401`; an authenticated user lacking permission
    uses `403`.
 7. Socket authentication must use the same identity source and verification
@@ -212,18 +218,18 @@ where the same rule applies. A missing resource may intentionally be returned as
 | Method | Path | Auth | Status | Purpose |
 |---|---|---|---|---|
 | `GET` | `/health` | None | **Implemented** | Process liveness only. |
+| `GET` | `/ready` | None | **Implemented** | MongoDB readiness. |
 
 ### 7.2 Authentication and session
 
-All routes in this table are **planned and not implemented**.
+All routes in this table are implemented.
 
 | Method | Path | Auth | Purpose | Success |
 |---|---|---|---|---|
-| `POST` | `/api/v1/auth/register` | None | Register a user. | `201` |
-| `POST` | `/api/v1/auth/login` | None | Verify credentials and establish a session. | `200` |
-| `POST` | `/api/v1/auth/refresh` | Refresh credential | Restore/rotate an authenticated session. | `200` |
-| `POST` | `/api/v1/auth/logout` | Required | End the current session. | `200` |
-| `GET` | `/api/v1/auth/session` | Required | Restore the current principal after refresh. | `200` |
+| `POST` | `/api/auth/register` | None | Register a user and establish a session. | `201` |
+| `POST` | `/api/auth/login` | None | Verify credentials and establish a session. | `200` |
+| `POST` | `/api/auth/logout` | Optional cookie | Clear the current session cookie idempotently. | `200` |
+| `GET` | `/api/auth/me` | Required | Restore the current principal from the session cookie. | `200` |
 
 Representative registration request:
 
@@ -240,7 +246,7 @@ Representative authenticated principal:
 ```json
 {
   "success": true,
-  "message": "Session restored",
+  "message": "Current user retrieved",
   "data": {
     "user": {
       "id": "user_opaque_id",
@@ -251,9 +257,11 @@ Representative authenticated principal:
 }
 ```
 
-Password policy, email verification, token lifetimes, refresh rotation, and
-multi-device session behavior remain unresolved. They must be documented before
-the authentication contract is considered frozen.
+Passwords currently require 8–72 characters, are hashed with bcrypt, and are
+never selected or returned by normal user queries. Access-token lifetime is
+configured with `ACCESS_TOKEN_EXPIRY` and defaults to 15 minutes. Email
+verification, refresh rotation, revocation, password recovery, and multi-device
+session behavior remain future decisions.
 
 ### 7.3 Auction marketplace and recovery
 
@@ -449,7 +457,8 @@ must be resolved before list endpoints are implemented.
 The available SRS does not settle the following. They remain deliberately open
 rather than being invented in implementation:
 
-1. REST credential transport, refresh rotation, revocation, and CSRF policy.
+1. Refresh rotation, revocation, password recovery, CSRF hardening beyond
+   `SameSite=Lax`, and cross-site production cookie deployment.
 2. Whether spectators must authenticate and which auction fields are public.
 3. Monetary unit/precision, whether to adopt the proposed integer-minor-unit
    representation, and the supported/default currency.

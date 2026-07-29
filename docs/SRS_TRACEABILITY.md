@@ -123,7 +123,7 @@ Every official identifier named by `BIDARENA.md` is preserved below. Ownership, 
 
 | Derived ID | Available requirement | Planned implementation area | Planned verification | Status |
 |---|---|---|---|---|
-| DA-01 | Provide registration, login, logout, validation, and session-restoration UX. | `client/src/pages`, `client/src/components`, `client/src/context` | Registration, login, logout, and refresh-restoration UI tests | Pending |
+| DA-01 | Provide registration, login, logout, validation, and session-restoration UX. | `client/src/pages`, `client/src/components`, `client/src/context` | Client lint/build pass; browser automation remains pending | Implemented |
 | DA-02 | Provide protected auction-creation UX with clear validation and submission states. | `client/src/pages`, `client/src/components` | Form validation and protected creation flow | Pending |
 | DA-03 | Provide auction discovery with upcoming, active, and completed filters. | `client/src/pages`, `client/src/services` | Discovery, filtering, loading, empty, and error states | Pending |
 | DA-04 | Present auction, product, and seller details clearly. | `client/src/pages`, `client/src/components` | Auction-details rendering and unavailable-auction states | Pending |
@@ -146,6 +146,8 @@ Every official identifier named by `BIDARENA.md` is preserved below. Ownership, 
 
 | Derived ID | Available requirement | Planned implementation area | Planned verification | Status |
 |---|---|---|---|---|
+| DB-01 | Provide backend registration/session support and derive authenticated HTTP/socket identity from verified credentials, never a client-provided `userId`. | HTTP auth implemented in `server/src/middleware`, `server/src/services`, and `server/src/models`; socket auth remains pending | Registration, duplicate email, login, invalid credentials, and protected `/me` pass | In Progress |
+| DB-02 | Persist and serve auction creation, discovery, detail, ownership, and authoritative status data. | `server/src/models`, `server/src/controllers`, `server/src/services` | Protected creation and discovery API tests | Pending |
 | DB-01 | Provide backend registration/session support and derive authenticated HTTP/socket identity from verified credentials, never a client-provided `userId`. | `server/src/middleware`, `server/src/services`, `server/src/sockets` | Auth success, rejection, refresh, and socket-auth tests | Pending |
 | DB-02 | Persist and serve auction creation, discovery, detail, ownership, and authoritative status data. | `server/src/models`, `server/src/controllers`, `server/src/services` | Protected creation and discovery API tests | In Progress |
 | DB-03 | Configure authenticated Socket.IO connections, isolated auction rooms, and participant/spectator presence. | `server/src/sockets`, `server/src/services` | Join, leave, unauthorized access, presence, and room-isolation tests | Pending |
@@ -174,7 +176,7 @@ Model evidence: `auction.model.js`, `bid.model.js`, and `timeline.model.js` now 
 | Derived ID | Available requirement | Planned integration scope | Planned verification | Status |
 |---|---|---|---|---|
 | SI-01 | Freeze matching REST, Socket.IO, authentication, error, status, time, and payload contracts before feature development. | Client/server contract documents and shared conventions | Contract review and client/server payload compatibility | Pending |
-| SI-02 | Integrate registration, login, logout, authenticated requests, socket authentication, and refresh restoration. | Domain A auth UX plus Domain B auth services | End-to-end registration, login, logout, and refresh tests | Pending |
+| SI-02 | Integrate registration, login, logout, authenticated requests, socket authentication, and refresh restoration. | HTTP cookie session and client restoration implemented; socket authentication and refresh rotation remain pending | HTTP auth integration tests pass; browser and socket tests remain pending | In Progress |
 | SI-03 | Integrate protected auction creation, discovery, filtering, and details. | Domain A marketplace UX plus Domain B auction APIs | End-to-end marketplace flow | Pending |
 | SI-04 | Integrate two-browser bidding with valid, invalid, duplicate, simultaneous, ordered, and authoritative updates. | Domain A room/bid UX plus Domain B bid engine | Two-browser race and rejection suite | Pending |
 | SI-05 | Integrate server-owned timing, visual countdown, late-bid rejection, auction completion, winner display, and read-only state. | Domain A timer/completion UX plus Domain B timer/winner engine | Clock synchronization and completion flow | Pending |
