@@ -3,34 +3,17 @@ import mongoose from 'mongoose'
 import Auction from '../models/auction.model.js'
 import Bid from '../models/bid.model.js'
 import Timeline from '../models/timeline.model.js'
+import { User } from '../models/user.model.js'
+import {
+  serializeAuctionState,
+  serializeBidState,
+  serializeTimelineState,
+} from './auction-payload.service.js'
 
 export class BidRejectedError extends Error {}
 
 function reject(message) {
   throw new BidRejectedError(message)
-}
-
-function serializeBid(bid) {
-  return {
-    id: bid.id,
-    auctionId: bid.auction.toString(),
-    bidder: bid.bidder.toString(),
-    amount: bid.amount,
-    clientBidId: bid.clientBidId,
-    serverSequence: bid.serverSequence,
-    timestamp: bid.timestamp,
-  }
-}
-
-function serializeAuction(auction) {
-  return {
-    id: auction.id,
-    currentBid: auction.currentBid,
-    currentBidder: auction.currentBidder.toString(),
-    bidCount: auction.bidCount,
-    sequence: auction.sequence,
-    version: auction.version,
-  }
 }
 
 export async function processBid({
@@ -103,6 +86,15 @@ export async function processBid({
         reject(`Bid must be at least ${minimumBid}`)
       }
 
+      const bidder = await User.findById(bidderId)
+        .select('_id displayName avatar')
+        .session(session)
+        .lean()
+
+      if (!bidder) {
+        reject('Bidder account not found')
+      }
+
       auction.currentBid = amount
       auction.currentBidder = bidderId
       auction.bidCount = (auction.bidCount ?? 0) + 1
@@ -125,7 +117,7 @@ export async function processBid({
         { session },
       )
 
-      await Timeline.create(
+      const [timelineEvent] = await Timeline.create(
         [
           {
             auction: auction.id,
@@ -142,9 +134,19 @@ export async function processBid({
         { session },
       )
 
+      const auctionState = auction.toObject()
+      const bidState = bid.toObject()
+      const timelineState = timelineEvent.toObject()
+      auctionState.currentBidder = bidder
+      bidState.bidder = bidder
+      timelineState.actor = bidder
+      const latestBid = serializeBidState(bidState)
+
       acceptedBid = {
-        bid: serializeBid(bid),
-        auction: serializeAuction(auction),
+        auction: serializeAuctionState(auctionState),
+        bid: latestBid,
+        latestBid,
+        timelineEvent: serializeTimelineState(timelineState),
       }
     })
   } catch (error) {

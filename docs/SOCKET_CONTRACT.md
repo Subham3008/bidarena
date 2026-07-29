@@ -7,8 +7,8 @@
 
 The Domain A auction-room client consumes the implemented snapshot and presence
 events. Its bid control waits for a `place_bid` acknowledgement and never
-updates bid state optimistically; the backend bid command remains pending
-Domain B implementation.
+updates bid state optimistically; committed room broadcasts and snapshots are
+the authoritative state.
 
 This contract defines the initial real-time boundary for auction rooms. The
 backend remains the source of truth. A socket command expresses intent; it does
@@ -123,7 +123,7 @@ The room/snapshot commands and `place_bid` are implemented. Chat remains planned
 | `join_auction` | Optional; required for bidder mode | Validate access, join one auction room, and emit a full snapshot. | `{}` |
 | `leave_auction` | Same socket that joined | Leave an auction room. | `{}` |
 | `request_auction_snapshot` | Joined socket | Emit authoritative room state after a gap or suspected staleness. | `{}` |
-| `place_bid` | Joined verified bidder | Queue and atomically persist one bid intent. | `{ bid, auction }` |
+| `place_bid` | Joined verified bidder | Queue and atomically persist one bid intent. | `{ bid, latestBid, auction, timelineEvent }` |
 | `send_chat_message` | Joined/authorized socket | Submit a room-isolated chat message. | Persisted/accepted chat message. |
 
 ### 5.1 `join_auction`
@@ -204,16 +204,27 @@ Successful acknowledgement:
     "bid": {
       "id": "bid_opaque_id",
       "auctionId": "auction_opaque_id",
-      "bidder": "user_opaque_id",
+      "bidder": {
+        "id": "user_opaque_id",
+        "name": "Visible participant name",
+        "avatarUrl": null
+      },
       "amount": 125000,
       "clientBidId": "unique-client-generated-id",
+      "sequence": 43,
       "serverSequence": 43,
+      "createdAt": "2026-08-01T12:11:00.000Z",
       "timestamp": "2026-08-01T12:11:00.000Z"
     },
     "auction": {
       "id": "auction_opaque_id",
+      "status": "ACTIVE",
       "currentBid": 125000,
-      "currentBidder": "user_opaque_id",
+      "currentBidder": {
+        "id": "user_opaque_id",
+        "name": "Visible participant name",
+        "avatarUrl": null
+      },
       "bidCount": 43,
       "sequence": 43,
       "version": 7
@@ -221,6 +232,9 @@ Successful acknowledgement:
   }
 }
 ```
+
+The success data also includes `latestBid` (the canonical alias of `bid`) and
+the committed `timelineEvent`, matching the room broadcast.
 
 Representative rejection:
 
@@ -282,7 +296,7 @@ events below remain planned.
 | `auction_snapshot` | One authorized socket | Push a full replacement snapshot during explicit server-led resynchronization. |
 | `auction_started` | Auction room | Announce the authoritative `UPCOMING` to `ACTIVE` transition. |
 | `timer_sync` | Auction room | Synchronize an active auction countdown to backend time. |
-| `auction_state_updated` | Auction room | Publish an accepted bid and authoritative resulting state after commit. |
+| `auction_state_updated` | Auction room | Publish authoritative state after a committed bid or completion. |
 | `bid_rejected` | Requesting socket only | Report a rejected bid without room broadcast. |
 | `auction_completed` | Auction room | Publish the one-time persisted completion and winner result. |
 | `presence_updated` | Auction room | Publish active bidder and spectator counts. |
@@ -297,9 +311,49 @@ events below remain planned.
 
 ```json
 {
-  "auction": {},
-  "latestBids": [],
-  "timeline": [],
+  "auction": {
+    "id": "auction_opaque_id",
+    "status": "COMPLETED",
+    "currentBid": 125000,
+    "currentBidder": {
+      "id": "user_opaque_id",
+      "name": "Visible participant name",
+      "avatarUrl": null
+    },
+    "winner": {
+      "id": "user_opaque_id",
+      "name": "Visible participant name",
+      "avatarUrl": null
+    },
+    "winningAmount": 125000,
+    "bidCount": 43,
+    "sequence": 43
+  },
+  "latestBids": [
+    {
+      "id": "bid_opaque_id",
+      "amount": 125000,
+      "sequence": 43,
+      "createdAt": "2026-08-01T12:11:00.000Z",
+      "bidder": {
+        "id": "user_opaque_id",
+        "name": "Visible participant name",
+        "avatarUrl": null
+      }
+    }
+  ],
+  "timeline": [
+    {
+      "id": "timeline_opaque_id",
+      "type": "WINNER_DECLARED",
+      "createdAt": "2026-08-01T12:30:00.000Z",
+      "actor": {
+        "id": "user_opaque_id",
+        "name": "Visible participant name",
+        "avatarUrl": null
+      }
+    }
+  ],
   "serverTime": 1785595800000,
   "activeBidderCount": 1,
   "spectatorCount": 2,
@@ -309,30 +363,58 @@ events below remain planned.
 
 Because `currentUserRole` may differ per socket, a full snapshot containing it
 is sent to one socket rather than broadcast unchanged to the whole room.
+MongoDB references are populated with only `_id`, `displayName`, and `avatar`;
+the public payload maps them to `id`, `name`, and `avatarUrl`.
 
 ### 6.2 `auction_state_updated`
 
 ```json
 {
   "auctionId": "auction_opaque_id",
-  "currentBid": 125000,
-  "currentBidder": "user_opaque_id",
-  "bidCount": 43,
-  "sequence": 43,
-  "latestAcceptedBid": {
+  "auction": {
+    "id": "auction_opaque_id",
+    "status": "ACTIVE",
+    "currentBid": 125000,
+    "currentBidder": {
+      "id": "user_opaque_id",
+      "name": "Visible participant name",
+      "avatarUrl": null
+    },
+    "winner": null,
+    "winningAmount": null,
+    "bidCount": 43,
+    "sequence": 43,
+    "endAt": "2026-08-01T12:30:00.000Z"
+  },
+  "latestBid": {
     "id": "bid_opaque_id",
-    "clientBidId": "unique-client-generated-id",
     "amount": 125000,
-    "bidder": "user_opaque_id",
-    "serverSequence": 43,
-    "timestamp": "2026-08-01T12:11:00.000Z"
+    "sequence": 43,
+    "createdAt": "2026-08-01T12:11:00.000Z",
+    "bidder": {
+      "id": "user_opaque_id",
+      "name": "Visible participant name",
+      "avatarUrl": null
+    }
+  },
+  "timelineEvent": {
+    "id": "timeline_opaque_id",
+    "type": "BID_ACCEPTED",
+    "createdAt": "2026-08-01T12:11:00.000Z",
+    "actor": {
+      "id": "user_opaque_id",
+      "name": "Visible participant name",
+      "avatarUrl": null
+    }
   },
   "serverTime": 1785595860000
 }
 ```
 
-This event is emitted only after persistence commits. A rejected bid produces no
-room event.
+This event is emitted to the full auction room, including the bidder, only after
+persistence commits. A rejected or duplicate bid produces no room event. The
+payload also retains model-name aliases such as `serverSequence`, `timestamp`,
+`eventType`, and `bid` in command acknowledgements.
 
 ### 6.3 `auction_started`
 
@@ -351,19 +433,35 @@ room event.
 ```json
 {
   "auctionId": "auction_opaque_id",
-  "status": "COMPLETED",
-  "winner": {
-    "id": "user_opaque_id"
+  "auction": {
+    "id": "auction_opaque_id",
+    "status": "COMPLETED",
+    "currentBid": 125000,
+    "bidCount": 43,
+    "winner": {
+      "id": "user_opaque_id",
+      "name": "Visible winner name",
+      "avatarUrl": null
+    },
+    "winningAmount": 125000
   },
-  "winningAmount": 125000,
-  "bidCount": 43,
+  "timelineEvent": {
+    "type": "WINNER_DECLARED",
+    "winner": {
+      "id": "user_opaque_id",
+      "name": "Visible winner name",
+      "avatarUrl": null
+    }
+  },
   "serverTime": 1785597000000
 }
 ```
 
 If there is no accepted bid, `winner` and `winningAmount` are `null`. Completion
 is persisted atomically and broadcast at most once for the winning state
-transition.
+transition. The same nested authoritative state is also emitted through
+`auction_state_updated`; `auction_completed` retains top-level status, winner,
+winning amount, and bid-count mirrors for compatibility.
 
 ### 6.5 `presence_updated`
 
@@ -486,8 +584,8 @@ routed through or block the bid queue.
   authoritative auction update, and required timeline record before broadcast.
 - A rejected bid consumes no accepted-bid sequence number.
 - `clientBidId` provides duplicate detection; it is not the authoritative order.
-- Clients apply an `auction_state_updated` event only if its sequence is newer than the
-  last applied bid sequence.
+- Clients apply a bid-driven `auction_state_updated` event only if
+  `auction.sequence` is newer than the last applied bid sequence.
 - A duplicate or older sequence is ignored. A gap triggers
   `request_auction_snapshot`; the client does not invent missing bids.
 - `auction.sequence` in a snapshot is the authoritative recovery watermark.
