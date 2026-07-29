@@ -15,12 +15,13 @@ Derived identifiers are planning aids, not substitutes for official SRS identifi
 
 ## Status rules
 
-Only the following statuses are used during this foundation phase:
+The following statuses are currently used:
 
 - `Pending`: the requirement is described by the available source, but product implementation and verification have not begun.
+- `In Progress`: a verified implementation slice exists, but the complete requirement is not yet implemented or tested.
 - `Blocked`: the requirement identifier is known, but its authoritative wording is unavailable.
 
-No row in this document claims that a product feature is implemented, tested, integrated, or complete. Branch names below describe the future ownership workflow only; no branch creation is implied by this document.
+No row claims that a complete product feature is tested, integrated, or done. Branch names below describe the ownership workflow.
 
 ## Official SRS identifier registry
 
@@ -147,21 +148,25 @@ Every official identifier named by `BIDARENA.md` is preserved below. Ownership, 
 |---|---|---|---|---|
 | DB-01 | Provide backend registration/session support and derive authenticated HTTP/socket identity from verified credentials, never a client-provided `userId`. | HTTP auth implemented in `server/src/middleware`, `server/src/services`, and `server/src/models`; socket auth remains pending | Registration, duplicate email, login, invalid credentials, and protected `/me` pass | In Progress |
 | DB-02 | Persist and serve auction creation, discovery, detail, ownership, and authoritative status data. | `server/src/models`, `server/src/controllers`, `server/src/services` | Protected creation and discovery API tests | Pending |
+| DB-01 | Provide backend registration/session support and derive authenticated HTTP/socket identity from verified credentials, never a client-provided `userId`. | `server/src/middleware`, `server/src/services`, `server/src/sockets` | Auth success, rejection, refresh, and socket-auth tests | Pending |
+| DB-02 | Persist and serve auction creation, discovery, detail, ownership, and authoritative status data. | `server/src/models`, `server/src/controllers`, `server/src/services` | Protected creation and discovery API tests | In Progress |
 | DB-03 | Configure authenticated Socket.IO connections, isolated auction rooms, and participant/spectator presence. | `server/src/sockets`, `server/src/services` | Join, leave, unauthorized access, presence, and room-isolation tests | Pending |
 | DB-04 | Process bids through an independent sequential queue for each auction while allowing different auctions to progress independently. | `server/src/engine` | Simultaneous same-auction ordering and concurrent-auction isolation | Pending |
 | DB-05 | Reject unauthenticated, missing-auction, inactive, late, seller self-bid, spectator, missing, non-numeric, negative, below-minimum, duplicate, and completed-auction bids. | `server/src/validators`, `server/src/engine` | One focused test for every rejection rule | Pending |
-| DB-06 | Protect bid processing from duplicate `clientBidId` requests. | `server/src/engine`, `server/src/models` | Duplicate submission and retry/reconnect behavior | Pending |
-| DB-07 | Assign a deterministic, server-generated sequence number to every accepted bid. | `server/src/engine`, `server/src/models` | Monotonic sequence and simultaneous-bid ordering tests | Pending |
-| DB-08 | Atomically persist the auction update, bid record, timeline record, and sequence increment before cache update, broadcast, or acknowledgement. | `server/src/services`, `server/src/models` | Transaction rollback and database-before-broadcast tests | Pending |
+| DB-06 | Protect bid processing from duplicate `clientBidId` requests. | `server/src/engine`, `server/src/models` | Duplicate submission and retry/reconnect behavior | In Progress |
+| DB-07 | Assign a deterministic, server-generated sequence number to every accepted bid. | `server/src/engine`, `server/src/models` | Monotonic sequence and simultaneous-bid ordering tests | In Progress |
+| DB-08 | Atomically persist the auction update, bid record, timeline record, and sequence increment before cache update, broadcast, or acknowledgement. | `server/src/services`, `server/src/models` | Transaction rollback and database-before-broadcast tests | In Progress |
 | DB-09 | Use absolute `startAt` and `endAt` timestamps and keep the server authoritative for auction activity and expiry. | `server/src/engine`, `server/src/jobs` | Activation, timer-expiry, clock-boundary, and late-bid tests | Pending |
 | DB-10 | Complete an auction atomically, declare at most one winner, persist completion/timeline state, reject later bids, and make the room read-only. | `server/src/engine`, `server/src/services` | Winner, no-duplicate-winner, and repeated-completion tests | Pending |
 | DB-11 | Produce a full authoritative snapshot for browser refresh and socket reconnection recovery. | `server/src/services`, `server/src/sockets` | Snapshot contents, stale-state replacement, and reconnect tests | Pending |
 | DB-12 | On server startup, inspect upcoming/active auctions, safely complete expired auctions, restore timers and relevant cache, and prevent duplicate winners. | `server/src/jobs`, `server/src/services` | Server-restart and expired-auction recovery tests | Pending |
-| DB-13 | Persist timeline events and calculate authoritative live statistics and auction heat. | `server/src/models`, `server/src/services` | Timeline persistence and calculation tests | Pending |
+| DB-13 | Persist timeline events and calculate authoritative live statistics and auction heat. | `server/src/models`, `server/src/services` | Timeline persistence and calculation tests | In Progress |
 | DB-14 | Isolate chat by auction room and keep chat validation or persistence failure outside the bid-processing path. | `server/src/sockets`, `server/src/services` | Cross-room leakage and chat-failure-isolation tests | Pending |
 | DB-15 | Verify winner identity, create Razorpay test orders, verify signatures server-side, persist payment status separately from auction status, and broadcast payment updates. | `server/src/controllers`, `server/src/services` | Order authorization, signature verification, and payment-failure tests | Pending |
 | DB-16 | Use Redis only for clearly documented cache, presence, idempotency, locking, rate limiting, or Socket.IO scaling responsibilities while retaining MongoDB as the permanent source of truth. | `server/src/config`, `server/src/services` | Redis availability, fallback, invalidation, TTL, and restart tests | Pending |
 | DB-17 | Provide focused backend tests for engine correctness, persistence, concurrency, recovery, payment, Redis fallback, and fault tolerance. | `server/src/tests` | Backend test suite and startup evidence | Pending |
+
+Model evidence: `auction.model.js`, `bid.model.js`, and `timeline.model.js` now provide validated persistence schemas, ordering indexes, and auction-scoped bid idempotency. Engine services, atomic transactions, and behavioral tests remain pending.
 
 ### Shared integration
 
