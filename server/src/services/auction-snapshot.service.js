@@ -21,6 +21,7 @@ function serializeAuction(auction) {
     endAt: auction.endAt,
     status: auction.status,
     winner: toId(auction.winner),
+    winningAmount: auction.winningAmount ?? null,
     bidCount: auction.bidCount,
     sequence: auction.sequence,
     paymentStatus: auction.paymentStatus,

@@ -18,7 +18,7 @@ async function runInTransaction(operation) {
   return result
 }
 
-export async function activateAuction(auctionId, now = new Date()) {
+async function activateAuctionWithinWindow(auctionId, now, endAtCondition) {
   return runInTransaction(async (session) => {
     // Server time and the persisted window exclusively own lifecycle activation.
     const auction = await Auction.findOneAndUpdate(
@@ -26,7 +26,7 @@ export async function activateAuction(auctionId, now = new Date()) {
         _id: auctionId,
         status: 'UPCOMING',
         startAt: { $lte: now },
-        endAt: { $gt: now },
+        endAt: endAtCondition,
       },
       {
         $set: { status: 'ACTIVE' },
@@ -55,9 +55,17 @@ export async function activateAuction(auctionId, now = new Date()) {
   })
 }
 
+export async function activateAuction(auctionId, now = new Date()) {
+  return activateAuctionWithinWindow(auctionId, now, { $gt: now })
+}
+
+async function activateExpiredAuctionForRecovery(auctionId, now) {
+  return activateAuctionWithinWindow(auctionId, now, { $lte: now })
+}
+
 export async function completeAuction(auctionId, now = new Date()) {
   return runInTransaction(async (session) => {
-    // The ACTIVE filter is the atomic guard against duplicate completion and winners.
+    // The ACTIVE guard makes timer, bid-race, and recovery completion idempotent.
     const auction = await Auction.findOneAndUpdate(
       {
         _id: auctionId,
@@ -69,6 +77,15 @@ export async function completeAuction(auctionId, now = new Date()) {
           $set: {
             status: 'COMPLETED',
             winner: { $ifNull: ['$currentBidder', null] },
+            winningAmount: {
+              $cond: [
+                {
+                  $ne: [{ $ifNull: ['$currentBidder', null] }, null],
+                },
+                '$currentBid',
+                null,
+              ],
+            },
             timelineSequence: {
               $add: [
                 { $ifNull: ['$timelineSequence', 0] },
@@ -111,7 +128,7 @@ export async function completeAuction(auctionId, now = new Date()) {
         eventType: 'WINNER_DECLARED',
         actor: auction.winner,
         sequence: auction.timelineSequence,
-        metadata: { winningBid: auction.currentBid },
+        metadata: { winningBid: auction.winningAmount },
         timestamp: now,
       })
     }
@@ -120,6 +137,34 @@ export async function completeAuction(auctionId, now = new Date()) {
 
     return auction
   })
+}
+
+export async function recoverAuctionState(auctionId, now = new Date()) {
+  const auction = await Auction.findById(auctionId)
+    .select('_id status startAt endAt')
+    .lean()
+  let activated = null
+  let completed = null
+
+  if (!auction) {
+    return { activated, completed }
+  }
+
+  if (auction.status === 'UPCOMING' && auction.endAt <= now) {
+    // A missed window is advanced in guarded steps, so a crash can resume safely.
+    activated = await activateExpiredAuctionForRecovery(auction._id, now)
+    completed = await completeAuction(auction._id, now)
+  } else if (
+    auction.status === 'UPCOMING' &&
+    auction.startAt <= now &&
+    auction.endAt > now
+  ) {
+    activated = await activateAuction(auction._id, now)
+  } else if (auction.status === 'ACTIVE' && auction.endAt <= now) {
+    completed = await completeAuction(auction._id, now)
+  }
+
+  return { activated, completed }
 }
 
 export async function recoverAuctionLifecycle(now = new Date()) {
@@ -134,17 +179,9 @@ export async function recoverAuctionLifecycle(now = new Date()) {
 
   // Status-guarded transitions make repeated startup recovery safe and idempotent.
   for (const auction of auctions) {
-    if (
-      auction.status === 'UPCOMING' &&
-      auction.startAt <= now &&
-      auction.endAt > now
-    ) {
-      const result = await activateAuction(auction._id, now)
-      activated += result ? 1 : 0
-    } else if (auction.status === 'ACTIVE' && auction.endAt <= now) {
-      const result = await completeAuction(auction._id, now)
-      completed += result ? 1 : 0
-    }
+    const result = await recoverAuctionState(auction._id, now)
+    activated += result.activated ? 1 : 0
+    completed += result.completed ? 1 : 0
   }
 
   return { activated, completed }

@@ -66,6 +66,11 @@ const auctionSchema = new Schema(
       ref: 'User',
       default: null,
     },
+    winningAmount: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
     bidCount: {
       type: Number,
       default: 0,

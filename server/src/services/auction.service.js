@@ -1,5 +1,7 @@
 import Auction from '../models/auction.model.js'
+import { scheduleAuctionLifecycle } from './auction-timer-manager.js'
 import { AppError } from '../utils/app-error.js'
+
 
 const SORT_OPTIONS = {
   newest: { createdAt: -1, _id: -1 },
@@ -91,6 +93,7 @@ export async function createAuction({ sellerId, auctionData }) {
     bidCount: 0,
   })
 
+  scheduleAuctionLifecycle(auction)
   await auction.populate('seller', '_id displayName')
   return serializeCreatedAuction(auction)
 }
