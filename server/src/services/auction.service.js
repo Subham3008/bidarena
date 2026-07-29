@@ -1,0 +1,125 @@
+import Auction from '../models/auction.model.js'
+
+const SORT_OPTIONS = {
+  newest: { createdAt: -1, _id: -1 },
+  endingSoon: { endAt: 1, _id: 1 },
+  priceLow: { currentBid: 1, _id: 1 },
+  priceHigh: { currentBid: -1, _id: -1 },
+}
+
+function escapeRegularExpression(value) {
+  return value.replace(/[.*+?^$()|[\]\\{}]/g, '\\$&')
+}
+
+function serializeSeller(seller) {
+  if (!seller) {
+    return null
+  }
+
+  return {
+    _id: seller._id.toString(),
+    name: seller.displayName,
+  }
+}
+
+function serializeCreatedAuction(auction) {
+  return {
+    _id: auction._id.toString(),
+    title: auction.title,
+    description: auction.description,
+    image: auction.image,
+    startBid: auction.startBid,
+    minimumIncrement: auction.minimumIncrement,
+    currentBid: auction.currentBid,
+    startAt: auction.startAt,
+    endAt: auction.endAt,
+    status: auction.status,
+    bidCount: auction.bidCount,
+    seller: serializeSeller(auction.seller),
+    createdAt: auction.createdAt,
+    updatedAt: auction.updatedAt,
+  }
+}
+
+function serializeAuctionSummary(auction) {
+  return {
+    _id: auction._id.toString(),
+    title: auction.title,
+    image: auction.image,
+    startBid: auction.startBid,
+    currentBid: auction.currentBid,
+    startAt: auction.startAt,
+    endAt: auction.endAt,
+    status: auction.status,
+    bidCount: auction.bidCount,
+    seller: serializeSeller(auction.seller),
+  }
+}
+
+export async function createAuction({ sellerId, auctionData }) {
+  const now = new Date()
+  const status = auctionData.startAt > now ? 'UPCOMING' : 'ACTIVE'
+
+  // Seller identity and mutable auction state always come from the server.
+  const auction = await Auction.create({
+    ...auctionData,
+    seller: sellerId,
+    status,
+    currentBid: auctionData.startBid,
+    currentBidder: null,
+    winner: null,
+    bidCount: 0,
+  })
+
+  await auction.populate('seller', '_id displayName')
+  return serializeCreatedAuction(auction)
+}
+
+export async function discoverAuctions({
+  status,
+  search,
+  page,
+  limit,
+  sort,
+}) {
+  const filter = {
+    status: {
+      $in: ['UPCOMING', 'ACTIVE', 'COMPLETED'],
+    },
+  }
+
+  if (status) {
+    filter.status = status
+  }
+
+  if (search) {
+    filter.title = {
+      $regex: escapeRegularExpression(search),
+      $options: 'i',
+    }
+  }
+
+  const skip = (page - 1) * limit
+  const [auctions, totalItems] = await Promise.all([
+    Auction.find(filter)
+      .select(
+        'title image startBid currentBid startAt endAt status bidCount seller',
+      )
+      .sort(SORT_OPTIONS[sort])
+      .skip(skip)
+      .limit(limit)
+      .populate('seller', '_id displayName')
+      .lean(),
+    Auction.countDocuments(filter),
+  ])
+
+  return {
+    auctions: auctions.map(serializeAuctionSummary),
+    pagination: {
+      page,
+      limit,
+      totalItems,
+      totalPages: Math.ceil(totalItems / limit),
+    },
+  }
+}

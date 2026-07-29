@@ -5,6 +5,7 @@ import mongoose from 'mongoose'
 
 import { env } from './config/env.js'
 import { errorHandler } from './middleware/error.middleware.js'
+import auctionRouter from './routes/auction.routes.js'
 import authRouter from './routes/auth.routes.js'
 
 const app = express()
@@ -12,7 +13,7 @@ const app = express()
 app.disable('x-powered-by')
 app.use(
   cors({
-    origin: env.clientUrl,
+    origin: env.clientUrl.replace(/\/+$/, ''),
     credentials: true,
   }),
 )
@@ -40,6 +41,7 @@ app.get('/ready', (_request, response) => {
 })
 
 app.use('/api/auth', authRouter)
+app.use('/api/auctions', auctionRouter)
 app.use(errorHandler)
 
 export default app
