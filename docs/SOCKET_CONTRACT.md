@@ -2,8 +2,8 @@
 
 > **Contract status:** Living contract.
 > **Implemented now:** optional cookie authentication, auction rooms,
-> authoritative snapshots, in-memory presence, and deterministic bidding. Chat,
-> timer broadcasting, Redis, and payment events remain planned.
+> authoritative snapshots, in-memory presence, deterministic bidding, and
+> authoritative lifecycle timers. Chat, Redis, and payment events remain planned.
 
 This contract defines the initial real-time boundary for auction rooms. The
 backend remains the source of truth. A socket command expresses intent; it does
@@ -268,13 +268,15 @@ changes auction state.
 
 ## 6. Server-to-client events
 
-`auction_snapshot`, `presence_updated`, `auction_state_updated`, and
-`bid_rejected` are implemented. Other events below remain planned.
+`auction_snapshot`, `presence_updated`, `auction_state_updated`, `bid_rejected`,
+`auction_started`, `timer_sync`, and `auction_completed` are implemented. Other
+events below remain planned.
 
 | Event | Audience | Purpose |
 |---|---|---|
 | `auction_snapshot` | One authorized socket | Push a full replacement snapshot during explicit server-led resynchronization. |
 | `auction_started` | Auction room | Announce the authoritative `UPCOMING` to `ACTIVE` transition. |
+| `timer_sync` | Auction room | Synchronize an active auction countdown to backend time. |
 | `auction_state_updated` | Auction room | Publish an accepted bid and authoritative resulting state after commit. |
 | `bid_rejected` | Requesting socket only | Report a rejected bid without room broadcast. |
 | `auction_completed` | Auction room | Publish the one-time persisted completion and winner result. |
@@ -284,7 +286,7 @@ changes auction state.
 | `chat_message_created` | Auction room | Publish an accepted room-isolated chat message. |
 | `payment_status_updated` | Auction room with public-safe fields | Publish backend-verified payment state. |
 
-There is deliberately no `timer_tick`, `countdown`, or per-second event.
+`timer_sync` is emitted only while the auction is authoritatively `ACTIVE`.
 
 ### 6.1 `auction_snapshot`
 
@@ -346,19 +348,17 @@ room event.
   "auctionId": "auction_opaque_id",
   "status": "COMPLETED",
   "winner": {
-    "id": "user_opaque_id",
-    "displayName": "Visible winner name",
-    "winningBid": 125000
+    "id": "user_opaque_id"
   },
-  "paymentStatus": "PENDING",
-  "completedAt": "2026-08-01T12:30:00.000Z",
+  "winningAmount": 125000,
+  "bidCount": 43,
   "serverTime": 1785597000000
 }
 ```
 
-If there is no accepted bid, `winner` is `null`. The exact no-bid completion
-wording is unresolved, but completion must still be persisted atomically and
-broadcast at most once for the winning state transition.
+If there is no accepted bid, `winner` and `winningAmount` are `null`. Completion
+is persisted atomically and broadcast at most once for the winning state
+transition.
 
 ### 6.5 `presence_updated`
 
@@ -430,6 +430,23 @@ and bid data explicitly present in snapshots and bid events.
 This event is emitted only after backend verification and persistence. Provider
 order IDs, payment IDs, signatures, and secrets are not included in the room
 broadcast.
+
+### 6.10 `timer_sync`
+
+```json
+{
+  "auctionId": "auction_opaque_id",
+  "status": "ACTIVE",
+  "serverTime": 1785595860000,
+  "startAt": "2026-08-01T12:00:00.000Z",
+  "endAt": "2026-08-01T12:30:00.000Z",
+  "remainingMs": 1140000
+}
+```
+
+The backend computes `serverTime` and non-negative `remainingMs`. Sync events
+stop after the persisted completion transition; the browser only renders the
+countdown and never changes auction status.
 
 ## 7. Error codes
 
@@ -529,8 +546,8 @@ Rules:
 - Anti-sniping is a stretch goal and is not part of this initial contract. No
   implicit `endAt` extension occurs unless that feature is separately specified,
   implemented, and documented.
-- No timer tick event exists. This avoids unnecessary traffic and prevents the
-  client from treating a stream of ticks as authoritative state.
+- `timer_sync` periodically aligns display countdowns with backend time. The
+  persisted lifecycle transition, not the sync stream, remains authoritative.
 
 ## 11. Open decisions requiring agreement
 

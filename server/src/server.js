@@ -5,10 +5,12 @@ import app from './app.js'
 import { connectDatabase } from './config/database.js'
 import { env } from './config/env.js'
 import { recoverAuctionLifecycle } from './services/auction-lifecycle.service.js'
+import { createAuctionTimerManager } from './services/auction-timer-manager.js'
 import { createAuctionSocketServer } from './sockets/auction-rooms.js'
 
 const httpServer = createServer(app)
 const io = createAuctionSocketServer(httpServer)
+const auctionTimerManager = createAuctionTimerManager(io)
 let isShuttingDown = false
 
 async function startServer() {
@@ -16,6 +18,7 @@ async function startServer() {
     // Accept traffic only after MongoDB is ready so startup never serves partial functionality.
     await connectDatabase()
     await recoverAuctionLifecycle()
+    await auctionTimerManager.schedulePersistedAuctions()
 
     httpServer.listen(env.port, env.host, () => {
       console.log(
@@ -64,6 +67,8 @@ async function shutdown(signal) {
   let shutdownFailed = false
 
   try {
+    // Timers stop first so shutdown cannot start new lifecycle database work.
+    await auctionTimerManager.shutdown()
     await closeSocketServer()
     await closeHttpServer()
   } catch {
