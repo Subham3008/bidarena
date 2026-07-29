@@ -5,8 +5,10 @@ import app from './app.js'
 import { connectDatabase } from './config/database.js'
 import { env } from './config/env.js'
 import { recoverAuctionLifecycle } from './services/auction-lifecycle.service.js'
+import { createAuctionSocketServer } from './sockets/auction-rooms.js'
 
 const httpServer = createServer(app)
+const io = createAuctionSocketServer(httpServer)
 let isShuttingDown = false
 
 async function startServer() {
@@ -44,6 +46,12 @@ function closeHttpServer() {
   })
 }
 
+function closeSocketServer() {
+  return new Promise((resolve) => {
+    io.close(resolve)
+  })
+}
+
 async function shutdown(signal) {
   if (isShuttingDown) {
     return
@@ -56,6 +64,7 @@ async function shutdown(signal) {
   let shutdownFailed = false
 
   try {
+    await closeSocketServer()
     await closeHttpServer()
   } catch {
     console.error('HTTP server shutdown failed')

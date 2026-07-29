@@ -5,6 +5,8 @@
 > **Implemented now:** health/readiness, HTTP authentication, auction creation,
 > and auction discovery.
 >
+> Auction, profile, payment, bidding, and chat routes remain planned. Socket.io
+> auction rooms and snapshots are implemented.
 > Auction details, profiles, payment, and Socket.IO routes remain planned.
 
 This document defines the initial HTTP boundary between the BidArena client and
@@ -31,6 +33,10 @@ authorization, persistence, and tests are complete.
 | `GET /health` | Implemented foundation endpoint | No database, Redis, or external-service readiness is implied. |
 | `GET /ready` | Implemented foundation endpoint | Reports MongoDB readiness. |
 | `/api/auth/*` | Implemented | HTTP-only JWT cookie authentication and session restoration. |
+| `/api/v1/auctions/*` | Planned | Marketplace, details, history, and recovery reads. |
+| `/api/v1/users/me/*` | Planned | Current-user profile and history. |
+| `/api/v1/auctions/:auctionId/payment/*` | Planned | Winner-only Razorpay test-mode flow. |
+| Socket.io auction rooms and snapshots | Implemented | Optional cookie identity, isolated rooms, snapshots, and presence. |
 | `GET /api/auctions` | Implemented | Public discovery, filtering, sorting, and pagination. |
 | `POST /api/auctions` | Implemented | Authenticated auction creation. |
 | `/api/auctions/:auctionId/*` | Planned | Details, history, recovery, and payment. |

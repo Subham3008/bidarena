@@ -1,9 +1,9 @@
 # BidArena Socket.io Contract
 
-> **Contract status:** Foundation draft for future implementation.  
-> **Implemented now:** none of the Socket.io commands or events below.  
-> The only currently implemented server contract is the REST `GET /health`
-> endpoint documented in [API_CONTRACT.md](./API_CONTRACT.md).
+> **Contract status:** Living contract.
+> **Implemented now:** optional cookie authentication, auction rooms,
+> authoritative snapshots, and in-memory presence. Bid, chat, timer, Redis, and
+> payment events remain planned.
 
 This contract defines the initial real-time boundary for auction rooms. The
 backend remains the source of truth. A socket command expresses intent; it does
@@ -13,40 +13,18 @@ timer expiry, winner, or payment status.
 ## 1. Connection and authentication
 
 - The initial contract uses the Socket.io default namespace `/`.
-- Each socket is authenticated during connection middleware before protected
-  commands are accepted.
-- The credential source must match the REST authentication design. Secure cookie
-  versus `auth.token` is unresolved; tokens must never be placed in a URL query
-  string or room broadcast.
+- Connection middleware verifies the existing `bidarena_session` JWT cookie
+  when present. A missing or invalid cookie leaves the socket anonymous.
 - A client-supplied `userId`, whether in the handshake or an event payload, is
   untrusted and never establishes identity.
-- The verified principal is attached to server-side socket context and is used
-  for seller, bidder, spectator, winner, and payment authorization.
-- Invalid or expired connection credentials fail through Socket.io
-  `connect_error`. Credential refresh and reconnect behavior must be frozen with
-  the REST auth design.
+- The verified principal is attached to `socket.data.user`; anonymous sockets
+  may join only as spectators.
 - The deployment path, allowed origins, and transport fallback policy are still
   unresolved. Event names and payloads do not depend on those deployment
   choices.
 
-Representative authentication failure:
-
-```js
-socket.on('connect_error', (error) => {
-  // error.message is human-readable; error.data carries the stable code.
-  console.log(error.data)
-})
-```
-
-```json
-{
-  "code": "UNAUTHENTICATED",
-  "retryable": false
-}
-```
-
-`connect_error` is a Socket.io handshake mechanism and therefore is the one
-error shape that does not use the normal command acknowledgement envelope.
+Socket connections remain available for spectators when identity cannot be
+verified. Bidder-mode joins are rejected through the command acknowledgement.
 
 ## 2. Naming and representation
 
@@ -89,8 +67,8 @@ Room rules:
 7. Credentials, email addresses, provider signatures, and private payment data
    are never room payloads.
 
-Whether a socket may join several auction rooms concurrently and whether an
-unauthenticated socket may join as a spectator are unresolved.
+A socket may join multiple isolated auction rooms. Unauthenticated sockets may
+join only with spectator intent.
 
 ## 4. Command acknowledgement envelope
 
@@ -102,7 +80,6 @@ Successful acknowledgement:
 ```json
 {
   "success": true,
-  "message": "Command completed",
   "data": {}
 }
 ```
@@ -112,18 +89,15 @@ Negative acknowledgement:
 ```json
 {
   "success": false,
-  "message": "Command rejected",
-  "error": {
-    "code": "STABLE_ERROR_CODE",
-    "details": {}
-  }
+  "message": "Command rejected"
 }
 ```
 
 Rules:
 
-- Clients branch on `error.code`, not `message`.
-- `details` is optional and contains only safe correction or recovery data.
+- Implemented room commands branch on `success`; `message` is safe display text.
+- Future domain commands may add stable error codes when their behavior is
+  implemented.
 - A negative acknowledgement is private to the requesting socket.
 - A command timeout is indeterminate, not proof of success or failure. The
   client reconnects or requests an authoritative snapshot before deciding what
@@ -137,13 +111,14 @@ Rules:
 
 ## 5. Client-to-server commands
 
-Every command below is **planned and not implemented**.
+The three room/snapshot commands are implemented. Bid and chat commands remain
+planned.
 
 | Command | Authentication | Purpose | Acknowledgement data |
 |---|---|---|---|
-| `join_auction` | Required or optional for spectator; unresolved | Validate access, join one auction room, and return a full snapshot. | `{ snapshot }` |
-| `leave_auction` | Same socket that joined | Leave an auction room. | `{ auctionId }` |
-| `request_auction_snapshot` | Joined/authorized socket | Recover authoritative room state after a gap or suspected staleness. | `{ snapshot }` |
+| `join_auction` | Optional; required for bidder mode | Validate access, join one auction room, and emit a full snapshot. | `{}` |
+| `leave_auction` | Same socket that joined | Leave an auction room. | `{}` |
+| `request_auction_snapshot` | Joined socket | Emit authoritative room state after a gap or suspected staleness. | `{}` |
 | `place_bid` | Required verified bidder | Enqueue and process one bid intent. | Accepted bid identity and sequence. |
 | `send_chat_message` | Joined/authorized socket | Submit a room-isolated chat message. | Persisted/accepted chat message. |
 
@@ -154,51 +129,25 @@ Request:
 ```json
 {
   "auctionId": "auction_opaque_id",
-  "requestedRole": "BIDDER"
+  "mode": "BIDDER"
 }
 ```
 
-`requestedRole` expresses client intent (`BIDDER` or `SPECTATOR`) but does not
-grant permission. The server derives `currentUserRole`; a seller cannot bypass
-self-bid protection by requesting `BIDDER`.
+`mode` expresses client intent (`BIDDER` or `SPECTATOR`) but does not grant a
+role. The server derives `SELLER`, `BIDDER`, or `SPECTATOR` from verified
+identity and authoritative auction ownership.
 
 Successful acknowledgement:
 
 ```json
 {
   "success": true,
-  "message": "Auction joined",
-  "data": {
-    "snapshot": {
-      "auction": {
-        "id": "auction_opaque_id",
-        "status": "ACTIVE",
-        "currency": "INR",
-        "startAt": "2026-08-01T12:00:00.000Z",
-        "endAt": "2026-08-01T12:30:00.000Z",
-        "highestBid": 120000,
-        "highestBidder": {
-          "id": "user_opaque_id",
-          "displayName": "Visible bidder name"
-        },
-        "minimumNextBid": 125000,
-        "winner": null
-      },
-      "latestBids": [],
-      "timeline": [],
-      "serverTime": 1785595800000,
-      "activeBidderCount": 1,
-      "spectatorCount": 0,
-      "currentUserRole": "BIDDER",
-      "paymentStatus": "PENDING",
-      "lastBidSequence": 42
-    }
-  }
+  "data": {}
 }
 ```
 
-The currency and values are illustrative. Snapshot history limits and public
-identity rules remain unresolved.
+Success emits `auction_snapshot` directly to the joining socket. MongoDB is the
+source, with at most 20 latest bids and 50 timeline events.
 
 ### 5.2 `leave_auction`
 
@@ -210,9 +159,7 @@ Request:
 }
 ```
 
-Leaving is safe to repeat. Whether a second leave returns success or a specific
-`NOT_IN_ROOM` error remains unresolved; either choice must not affect another
-auction room.
+Leaving is safe to repeat and does not affect another auction room.
 
 ### 5.3 `request_auction_snapshot`
 
@@ -224,8 +171,8 @@ Request:
 }
 ```
 
-The acknowledgement returns the same full `snapshot` shape as `join_auction`.
-The client replaces its local room state with this result.
+Success emits the same `auction_snapshot` shape as `join_auction`. The client
+replaces its local room state with this event.
 
 ### 5.4 `place_bid`
 
@@ -320,7 +267,8 @@ changes auction state.
 
 ## 6. Server-to-client events
 
-Every event below is **planned and not implemented**.
+`auction_snapshot` and `presence_updated` are implemented. Other events below
+remain planned.
 
 | Event | Audience | Purpose |
 |---|---|---|
@@ -346,9 +294,7 @@ There is deliberately no `timer_tick`, `countdown`, or per-second event.
   "serverTime": 1785595800000,
   "activeBidderCount": 1,
   "spectatorCount": 2,
-  "currentUserRole": "SPECTATOR",
-  "paymentStatus": "PENDING",
-  "lastBidSequence": 42
+  "currentUserRole": "SPECTATOR"
 }
 ```
 
@@ -429,7 +375,9 @@ broadcast at most once for the winning state transition.
 ```
 
 Presence is live operational state, not durable auction history. Disconnect
-grace periods and the definition of an active bidder remain unresolved.
+cleanup removes the socket from every joined auction. Presence tracks bidder,
+spectator, and seller membership per socket; the public counts include bidders
+and spectators.
 
 ### 6.6 `timeline_event_created`
 
@@ -594,21 +542,17 @@ Rules:
 
 The available SRS does not settle these points:
 
-1. Cookie versus token handshake transport, refresh, expiry, and revocation.
-2. Whether unauthenticated spectators may connect or read room snapshots.
-3. Socket.io deployment path, allowed origins, transports, and proxy settings.
-4. Whether one socket may join multiple auction rooms concurrently.
-5. Public bidder/winner identity masking.
-6. Snapshot limits for latest bids, timeline, and any chat history.
-7. A unified non-bid `stateVersion` and replay strategy.
-8. Duplicate `clientBidId` response semantics after a lost acknowledgement.
-9. Client acknowledgement timeouts, retry backoff, and server rate limits.
-10. Chat limits, history retention, moderation, and post-completion behavior.
-11. Presence grace periods and the exact definition of active bidder count.
-12. Timeline event registry and public payload schema.
-13. Statistics and auction-heat formulas and payload schema.
-14. Redis cache failure behavior during an otherwise persisted bid.
-15. Payment retry and reconciliation events.
+1. Socket.io deployment path, transports, and proxy settings.
+2. Public bidder/winner identity masking.
+3. A unified non-bid `stateVersion` and replay strategy.
+4. Duplicate `clientBidId` response semantics after a lost acknowledgement.
+5. Client acknowledgement timeouts, retry backoff, and server rate limits.
+6. Chat limits, history retention, moderation, and post-completion behavior.
+7. Presence disconnect grace periods.
+8. Timeline event registry and public payload schema.
+9. Statistics and auction-heat formulas and payload schema.
+10. Redis cache failure behavior during an otherwise persisted bid.
+11. Payment retry and reconciliation events.
 
 Both domains must resolve these in the shared contract before implementing
 dependent client and server behavior. Neither side may silently choose a
