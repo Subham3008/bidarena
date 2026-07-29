@@ -4,6 +4,7 @@ import mongoose from 'mongoose'
 import app from './app.js'
 import { connectDatabase } from './config/database.js'
 import { env } from './config/env.js'
+import { recoverAuctionLifecycle } from './services/auction-lifecycle.service.js'
 
 const httpServer = createServer(app)
 let isShuttingDown = false
@@ -12,6 +13,7 @@ async function startServer() {
   try {
     // Accept traffic only after MongoDB is ready so startup never serves partial functionality.
     await connectDatabase()
+    await recoverAuctionLifecycle()
 
     httpServer.listen(env.port, env.host, () => {
       console.log(

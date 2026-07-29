@@ -79,6 +79,12 @@ const auctionSchema = new Schema(
       min: 0,
       validate: Number.isInteger,
     },
+    timelineSequence: {
+      type: Number,
+      default: 0,
+      min: 0,
+      validate: Number.isInteger,
+    },
     paymentStatus: {
       type: String,
       enum: ['PENDING', 'SUCCESSFUL', 'FAILED'],
