@@ -1,5 +1,7 @@
 import Auction from '../models/auction.model.js'
 import { scheduleAuctionLifecycle } from './auction-timer-manager.js'
+import { AppError } from '../utils/app-error.js'
+
 
 const SORT_OPTIONS = {
   newest: { createdAt: -1, _id: -1 },
@@ -54,6 +56,25 @@ function serializeAuctionSummary(auction) {
     status: auction.status,
     bidCount: auction.bidCount,
     seller: serializeSeller(auction.seller),
+  }
+}
+
+function serializeAuctionDetails(auction) {
+  return {
+    _id: auction._id.toString(),
+    title: auction.title,
+    description: auction.description,
+    image: auction.image,
+    startBid: auction.startBid,
+    minimumIncrement: auction.minimumIncrement,
+    currentBid: auction.currentBid,
+    startAt: auction.startAt,
+    endAt: auction.endAt,
+    status: auction.status,
+    bidCount: auction.bidCount,
+    seller: serializeSeller(auction.seller),
+    createdAt: auction.createdAt,
+    updatedAt: auction.updatedAt,
   }
 }
 
@@ -124,4 +145,19 @@ export async function discoverAuctions({
       totalPages: Math.ceil(totalItems / limit),
     },
   }
+}
+
+export async function getAuctionDetails(auctionId) {
+  const auction = await Auction.findById(auctionId)
+    .select(
+      'title description image startBid minimumIncrement currentBid startAt endAt status bidCount seller createdAt updatedAt',
+    )
+    .populate('seller', '_id displayName')
+    .lean()
+
+  if (!auction) {
+    throw new AppError(404, 'AUCTION_NOT_FOUND', 'Auction not found')
+  }
+
+  return serializeAuctionDetails(auction)
 }

@@ -1,6 +1,7 @@
 import {
   createAuction,
   discoverAuctions,
+  getAuctionDetails,
 } from '../services/auction.service.js'
 
 export async function createAuctionController(request, response) {
@@ -25,5 +26,17 @@ export async function discoverAuctionsController(request, response) {
     success: true,
     message: 'Auctions fetched successfully',
     data,
+  })
+}
+
+export async function getAuctionDetailsController(request, response) {
+  const auction = await getAuctionDetails(
+    request.validatedParams.auctionId,
+  )
+
+  response.status(200).json({
+    success: true,
+    message: 'Auction fetched successfully',
+    data: { auction },
   })
 }
