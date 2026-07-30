@@ -1,8 +1,13 @@
 # BidArena REST API Contract
 
-> **Contract status:** Foundation draft for future implementation.  
-> **Implemented now:** only `GET /health`.  
-> Every `/api/v1` route in this document is **planned and not implemented**.
+> **Contract status:** Living contract.
+>
+> **Implemented now:** health/readiness, HTTP authentication, auction creation,
+> discovery, public auction details, seller auction management, protected image
+> uploads, profile editing, seller-owned auctions, and winner payments.
+>
+> Bidding and chat REST routes remain planned. Socket.io auction rooms and
+> snapshots are implemented.
 
 This document defines the initial HTTP boundary between the BidArena client and
 server. It is a contract, not evidence that a feature exists. A planned route
@@ -11,11 +16,11 @@ authorization, persistence, and tests are complete.
 
 ## 1. Scope and versioning
 
-- Product routes use the `/api/v1` prefix.
+- Product HTTP routes use the `/api` prefix.
 - The infrastructure health check remains unversioned at `/health`.
 - JSON request and response fields use `camelCase`.
-- Request and response bodies use `application/json`, except for an image upload
-  mechanism if one is selected later.
+- Request and response bodies use `application/json`, except
+  `POST /api/uploads/auction-image`, which uses `multipart/form-data`.
 - Breaking changes require a new API version or an explicitly coordinated
   client/server migration.
 - Live bidding and room chat are Socket.io commands, not REST operations, in the
@@ -26,11 +31,18 @@ authorization, persistence, and tests are complete.
 | Surface | Status | Notes |
 |---|---|---|
 | `GET /health` | Implemented foundation endpoint | No database, Redis, or external-service readiness is implied. |
-| `/api/v1/auth/*` | Planned | Authentication transport is still an open decision. |
-| `/api/v1/auctions/*` | Planned | Marketplace, details, history, and recovery reads. |
-| `/api/v1/users/me/*` | Planned | Current-user profile and history. |
-| `/api/v1/auctions/:auctionId/payment/*` | Planned | Winner-only Razorpay test-mode flow. |
-| Socket.io auction commands and events | Planned | Defined separately; none are implemented by this document. |
+| `GET /ready` | Implemented foundation endpoint | Reports MongoDB readiness. |
+| `/api/auth/*` | Implemented | HTTP-only JWT cookie authentication and session restoration. |
+| Socket.io auction rooms and snapshots | Implemented | Optional cookie identity, isolated rooms, snapshots, and presence. |
+| `GET /api/auctions` | Implemented | Public discovery, filtering, sorting, and pagination. |
+| `POST /api/auctions` | Implemented | Authenticated auction creation. |
+| `GET /api/auctions/:auctionId` | Implemented | Public auction details with a safe seller summary. |
+| `PATCH/DELETE /api/auctions/:auctionId` | Implemented | Owner-only management of eligible upcoming auctions. |
+| `POST /api/uploads/auction-image` | Implemented | Protected JPEG, PNG, or WebP upload, maximum 5 MB. |
+| `/api/payments/*` | Implemented | Winner Razorpay order, verification, and authorised payment status. |
+| `/api/auctions/:auctionId/*` | Planned | History and recovery subresources. |
+| `GET/PATCH /api/auth/me` | Implemented | Current-user profile read and safe profile updates. |
+| `GET /api/auctions/mine` | Implemented | Authenticated seller listings, status filters, counts, and pagination. |
 
 ## 3. Representation conventions
 
@@ -66,6 +78,8 @@ authorization, persistence, and tests are complete.
   Socket.io, and payment-provider calls.
 - Examples below follow that proposal and use `INR` only illustratively. They do
   not establish INR as the supported or default currency.
+- The implemented Razorpay boundary treats persisted integer `winningAmount`
+  as INR major units and safely converts it once to paise.
 - Once the decision is approved, the same representation must be used by every
   `amount`, `highestBid`, `minimumNextBid`, persistence field, and provider
   conversion. Clients format money for display but submit the unformatted
@@ -101,9 +115,12 @@ implementing mandatory scope.
 ## 4. Authentication and identity
 
 Protected REST routes require a principal established by authentication
-middleware. The exact credential transport—secure HTTP-only cookie, bearer
-access token, or a documented combination with refresh tokens—has not been
-selected by the available SRS and must be frozen before auth implementation.
+middleware. HTTP authentication uses a signed JWT in the
+`bidarena_session` cookie. The cookie is HTTP-only, defaults to `SameSite=Lax`,
+is scoped to `/`, and is marked `Secure` in production. Production may
+explicitly use `SameSite=None` for HTTPS cross-site hosting while retaining the
+strict credentialed origin allowlist. The server derives identity from the
+verified JWT subject; it never accepts identity from request data.
 
 Regardless of that decision, these rules are fixed:
 
@@ -113,7 +130,7 @@ Regardless of that decision, these rules are fixed:
 3. Request body and query identity fields never override the verified principal.
 4. Seller, bidder, spectator, winner, and payment permissions are derived from
    the verified principal plus authoritative auction data.
-5. Logout and refresh behavior must match the selected credential transport.
+5. Logout clears the session cookie using the same cookie scope.
 6. Authentication failure uses `401`; an authenticated user lacking permission
    uses `403`.
 7. Socket authentication must use the same identity source and verification
@@ -142,8 +159,7 @@ fields and enrich the response only after successful authentication.
   control flow.
 - `data` contains the operation result and may be omitted only when no result is
   needed, as in the minimal health response.
-- A list response may add a `meta` object after its pagination strategy is
-  frozen.
+- Auction discovery returns pagination beside `auctions` inside `data`.
 
 ### 5.2 Failed request
 
@@ -181,9 +197,13 @@ fields and enrich the response only after successful authentication.
 }
 ```
 
-This liveness response does not claim that MongoDB, Redis, Socket.io, Cloudinary,
-or Razorpay is ready. A dependency-readiness contract is unresolved and is not
-part of the foundation endpoint.
+This liveness response does not claim that MongoDB, Socket.io, Cloudinary, or
+Razorpay is ready.
+
+`GET /ready` reports only the required MongoDB dependency. It returns `200`
+with `database: "connected"` when Mongoose is connected, otherwise `503` with
+`database: "disconnected"`. Both responses are safe JSON without connection
+details.
 
 ## 6. HTTP status and error-code semantics
 
@@ -212,18 +232,18 @@ where the same rule applies. A missing resource may intentionally be returned as
 | Method | Path | Auth | Status | Purpose |
 |---|---|---|---|---|
 | `GET` | `/health` | None | **Implemented** | Process liveness only. |
+| `GET` | `/ready` | None | **Implemented** | MongoDB readiness. |
 
 ### 7.2 Authentication and session
 
-All routes in this table are **planned and not implemented**.
+All routes in this table are implemented.
 
 | Method | Path | Auth | Purpose | Success |
 |---|---|---|---|---|
-| `POST` | `/api/v1/auth/register` | None | Register a user. | `201` |
-| `POST` | `/api/v1/auth/login` | None | Verify credentials and establish a session. | `200` |
-| `POST` | `/api/v1/auth/refresh` | Refresh credential | Restore/rotate an authenticated session. | `200` |
-| `POST` | `/api/v1/auth/logout` | Required | End the current session. | `200` |
-| `GET` | `/api/v1/auth/session` | Required | Restore the current principal after refresh. | `200` |
+| `POST` | `/api/auth/register` | None | Register a user and establish a session. | `201` |
+| `POST` | `/api/auth/login` | None | Verify credentials and establish a session. | `200` |
+| `POST` | `/api/auth/logout` | Optional cookie | Clear the current session cookie idempotently. | `200` |
+| `GET` | `/api/auth/me` | Required | Restore the current principal from the session cookie. | `200` |
 
 Representative registration request:
 
@@ -240,7 +260,7 @@ Representative authenticated principal:
 ```json
 {
   "success": true,
-  "message": "Session restored",
+  "message": "Current user retrieved",
   "data": {
     "user": {
       "id": "user_opaque_id",
@@ -251,26 +271,32 @@ Representative authenticated principal:
 }
 ```
 
-Password policy, email verification, token lifetimes, refresh rotation, and
-multi-device session behavior remain unresolved. They must be documented before
-the authentication contract is considered frozen.
+Passwords currently require 8–72 characters, are hashed with bcrypt, and are
+never selected or returned by normal user queries. Access-token lifetime is
+configured with `ACCESS_TOKEN_EXPIRY` and defaults to 15 minutes. Email
+verification, refresh rotation, revocation, password recovery, and multi-device
+session behavior remain future decisions.
 
 ### 7.3 Auction marketplace and recovery
 
-All routes in this table are **planned and not implemented**.
+Creation, discovery, and public details are implemented. HTTP snapshot,
+bid-history, and timeline routes remain planned.
 
 | Method | Path | Auth | Purpose | Success |
 |---|---|---|---|---|
-| `GET` | `/api/v1/auctions` | Optional | Discover auctions and filter by SRS lifecycle status. | `200` |
-| `POST` | `/api/v1/auctions` | Required | Create an auction owned by the current user. | `201` |
-| `GET` | `/api/v1/auctions/:auctionId` | Optional | Get public auction details and viewer-safe state. | `200` |
-| `GET` | `/api/v1/auctions/:auctionId/snapshot` | Optional | Fetch authoritative recovery state outside Socket.io. | `200` |
-| `GET` | `/api/v1/auctions/:auctionId/bids` | Optional | Read persisted bid history. | `200` |
-| `GET` | `/api/v1/auctions/:auctionId/timeline` | Optional | Read persisted auction timeline entries. | `200` |
+| `GET` | `/api/auctions` | None | Discover auctions with filters, sorting, and pagination. | `200` |
+| `POST` | `/api/auctions` | Required | Create an auction owned by the current user. | `201` |
+| `GET` | `/api/auctions/:auctionId` | None | Get public auction details and a safe seller summary. | `200` |
+| `PATCH` | `/api/auctions/:auctionId` | Required | Update an eligible auction owned by the current user. | `200` |
+| `DELETE` | `/api/auctions/:auctionId` | Required | Delete an eligible auction owned by the current user. | `200` |
+| `POST` | `/api/uploads/auction-image` | Required | Upload one auction image using multipart field `image`. | `201` |
+| `GET` | `/api/auctions/:auctionId/snapshot` | Optional | Fetch authoritative recovery state outside Socket.io. | `200` |
+| `GET` | `/api/auctions/:auctionId/bids` | Optional | Read persisted bid history. | `200` |
+| `GET` | `/api/auctions/:auctionId/timeline` | Optional | Read persisted auction timeline entries. | `200` |
 
-Initial discovery filters are `status=UPCOMING|ACTIVE|COMPLETED` and a text
-search term. Exact search fields, sorting, page size limits, and cursor-versus-
-page pagination remain unresolved.
+Discovery accepts `status=UPCOMING|ACTIVE|COMPLETED`, a title `search`,
+`page` (default 1), `limit` (default 12, maximum 48), and `sort` values
+`newest`, `endingSoon`, `priceLow`, or `priceHigh`.
 
 Representative create request:
 
@@ -278,44 +304,56 @@ Representative create request:
 {
   "title": "Mechanical Keyboard",
   "description": "Seller-provided auction description",
-  "imageRefs": ["uploaded_image_reference"],
-  "currency": "INR",
-  "startingBid": 100000,
+  "category": "Electronics",
+  "image": "https://example.invalid/image.jpg",
+  "startBid": 100000,
   "minimumIncrement": 5000,
   "startAt": "2026-08-01T12:00:00.000Z",
   "endAt": "2026-08-01T12:30:00.000Z"
 }
 ```
 
-The example currency is illustrative. Upload transport, accepted image formats,
-image limits, supported currencies, scheduling constraints, and the exact
-minimum-bid policy must be frozen before implementation.
+Create and update requests store a validated HTTPS image URL. Clients obtain
+that URL by sending one JPEG, PNG, or WebP file (maximum 5 MB) as the `image`
+field of `multipart/form-data` to `POST /api/uploads/auction-image`. The server
+returns `data.url` and `data.publicId`; clients never receive Cloudinary secrets
+and must not set the multipart boundary manually.
+
+`PATCH /api/auctions/:auctionId` accepts a strict, non-empty subset of `title`,
+`description`, `category`, `image`, `startBid`, `minimumIncrement`, `startAt`,
+and `endAt`. Unknown or authoritative fields are validation errors. The server
+derives the seller from the session and permits changes only while the auction
+is `UPCOMING`, its start time is still in the future, and it has no accepted
+bids. A changed schedule replaces the existing lifecycle schedule. Changing
+`startBid` also resets the server-owned `currentBid`, which is safe because an
+editable auction cannot have accepted bids.
+
+`DELETE /api/auctions/:auctionId` uses the same ownership and lifecycle guards,
+requires `bidCount` to be zero and no persisted accepted bids, and cancels the
+auction's scheduled lifecycle work after a guarded atomic removal. Missing
+auctions return `404`, non-owners receive `403`, and lifecycle conflicts receive
+`409`.
 
 Representative auction projection:
 
 ```json
 {
-  "id": "auction_opaque_id",
+  "_id": "auction_opaque_id",
   "title": "Mechanical Keyboard",
   "description": "Seller-provided auction description",
-  "imageUrls": ["https://example.invalid/image"],
+  "category": "Electronics",
+  "image": "https://example.invalid/image.jpg",
   "seller": {
-    "id": "user_opaque_id",
-    "displayName": "Asha Rao"
+    "_id": "user_opaque_id",
+    "name": "Asha Rao"
   },
-  "currency": "INR",
   "status": "ACTIVE",
   "startAt": "2026-08-01T12:00:00.000Z",
   "endAt": "2026-08-01T12:30:00.000Z",
-  "startingBid": 100000,
-  "highestBid": 120000,
-  "minimumNextBid": 125000,
-  "highestBidder": {
-    "id": "user_opaque_id",
-    "displayName": "Visible bidder name"
-  },
-  "winner": null,
-  "paymentStatus": "PENDING",
+  "startBid": 100000,
+  "currentBid": 100000,
+  "minimumIncrement": 5000,
+  "bidCount": 0,
   "createdAt": "2026-07-30T09:00:00.000Z",
   "updatedAt": "2026-08-01T12:10:00.000Z"
 }
@@ -351,83 +389,101 @@ snapshot rather than merging guesses into it.
 
 ### 7.4 Current-user views
 
-All routes in this table are **planned and not implemented** and require an
-authenticated principal.
+Profile read/update and seller-owned auction discovery are implemented and
+require an authenticated principal. Bid and winner history remain planned.
 
 | Method | Path | Purpose | Success |
 |---|---|---|---|
-| `GET` | `/api/v1/users/me` | Read the current user's profile. | `200` |
-| `GET` | `/api/v1/users/me/auctions?relationship=created` | Read auctions created by the current user. | `200` |
-| `GET` | `/api/v1/users/me/auctions?relationship=won` | Read auctions won by the current user. | `200` |
-| `GET` | `/api/v1/users/me/bids` | Read the current user's persisted bid history. | `200` |
+| `GET` | `/api/auth/me` | Read the current user's profile. | `200` |
+| `PATCH` | `/api/auth/me` | Update display name, avatar URL, bio, and location. | `200` |
+| `GET` | `/api/auctions/mine` | Read the current seller's auctions with status filters and pagination. | `200` |
+| `GET` | `/api/users/me/auctions?relationship=won` | Read auctions won by the current user. | `200` |
+| `GET` | `/api/users/me/bids` | Read the current user's persisted bid history. | `200` |
 
-Profile editing fields and whether the seller dashboard needs a dedicated
-aggregate endpoint are unresolved. No update route is frozen yet.
+The profile update rejects email, password, role, permission, and authentication
+identifier fields. Seller identity for `/api/auctions/mine` always comes from
+the authenticated session.
 
 ### 7.5 Winner payment
 
-All routes in this table are **planned and not implemented**. They require an
-authenticated principal, and the server must verify that principal against the
-persisted auction winner.
+These routes require an authenticated principal. Order creation and
+verification derive the winner and amount only from the completed auction.
 
 | Method | Path | Purpose | Success |
 |---|---|---|---|
-| `GET` | `/api/v1/auctions/:auctionId/payment` | Read viewer-authorized payment status. | `200` |
-| `POST` | `/api/v1/auctions/:auctionId/payment/order` | Create a Razorpay test order for the verified winner. | `201` |
-| `POST` | `/api/v1/auctions/:auctionId/payment/verify` | Verify provider IDs and signature on the backend. | `200` |
+| `GET` | `/api/payments/auctions/:auctionId` | Winner checkout state or seller read-only status. | `200` |
+| `POST` | `/api/payments/auctions/:auctionId/order` | Create or reuse a Razorpay test order for the winner. | `201` |
+| `POST` | `/api/payments/verify` | Verify the stored order and Razorpay signature. | `200` |
 
 Representative order response:
 
 ```json
 {
   "success": true,
-  "message": "Payment order created",
+  "message": "Payment order ready",
   "data": {
     "order": {
-      "provider": "RAZORPAY",
+      "auctionId": "auction_opaque_id",
       "orderId": "provider_order_id",
       "amount": 120000,
-      "currency": "INR"
+      "currency": "INR",
+      "keyId": "rzp_test_public_key_id",
+      "auctionTitle": "Vintage Camera",
+      "winner": {
+        "id": "winner_opaque_id",
+        "name": "Auction Winner",
+        "avatarUrl": null
+      }
     }
   }
 }
 ```
 
+`amount` is INR in Razorpay's smallest unit (paise), converted safely from the
+persisted `winningAmount`. Request-body amount, winner, seller, or success
+claims never override database state.
+
 Representative verification request:
 
 ```json
 {
+  "auctionId": "auction_opaque_id",
   "razorpayOrderId": "provider_order_id",
   "razorpayPaymentId": "provider_payment_id",
   "razorpaySignature": "provider_signature"
 }
 ```
 
-The server verifies the signature before persisting `SUCCESSFUL`. A frontend
-checkout success callback alone never changes authoritative payment status.
-Provider secrets and signatures are never broadcast to the auction room.
+Verification checks the stored order and a timing-safe server HMAC before
+atomically persisting payment, `auction.paymentStatus`, and
+`PAYMENT_COMPLETED`.
+Repeated valid verification returns the existing result without duplicate
+records or timeline events. The derived checkout `status` is `NOT_ELIGIBLE`,
+`PENDING`, `PAID`, or `FAILED`, while `paymentStatus` retains the persisted
+`PENDING`, `SUCCESSFUL`, or `FAILED` enum. Sellers never receive checkout IDs,
+and secrets/signatures are never returned or broadcast.
 
 ## 8. List responses
 
-Until pagination is frozen, list data is consistently nested under a plural
-resource key:
+Auction discovery uses page-number pagination:
 
 ```json
 {
   "success": true,
-  "message": "Auctions retrieved",
+  "message": "Auctions fetched successfully",
   "data": {
-    "auctions": []
-  },
-  "meta": {
-    "pagination": {}
+    "auctions": [],
+    "pagination": {
+      "page": 1,
+      "limit": 12,
+      "totalItems": 0,
+      "totalPages": 0
+    }
   }
 }
 ```
 
-The empty pagination object is documentation shorthand only, not an implemented
-shape. Page-number versus cursor pagination, limits, totals, and stable sort keys
-must be resolved before list endpoints are implemented.
+An empty result remains a successful response with the same pagination shape.
 
 ## 9. State, idempotency, and side effects
 
@@ -438,9 +494,8 @@ must be resolved before list endpoints are implemented.
 - The initial contract does not expose REST bid submission. Bids use the
   authenticated Socket.io `place_bid` command and its `clientBidId` duplicate
   protection.
-- Whether auction creation and payment-order creation accept an HTTP
-  idempotency key is unresolved. Clients must not blindly retry those operations
-  until this is frozen.
+- Payment-order creation reuses the one pending order persisted for an auction.
+  Whether auction creation accepts an HTTP idempotency key remains unresolved.
 - Cache failure and provider failure must map to explicit errors or documented
   fallback behavior; they must not produce a false success envelope.
 
@@ -449,21 +504,24 @@ must be resolved before list endpoints are implemented.
 The available SRS does not settle the following. They remain deliberately open
 rather than being invented in implementation:
 
-1. REST credential transport, refresh rotation, revocation, and CSRF policy.
+1. Refresh rotation, revocation, password recovery, and final CSRF hardening
+   for cross-site production cookie deployment.
 2. Whether spectators must authenticate and which auction fields are public.
 3. Monetary unit/precision, whether to adopt the proposed integer-minor-unit
    representation, and the supported/default currency.
-4. Auction image upload route, limits, and Cloudinary reference lifecycle.
-5. Exact auction creation constraints and minimum-next-bid formula.
-6. Search fields, sort options, pagination strategy, and maximum page size.
+4. Cloudinary reference cleanup when an uploaded image is replaced or its
+   auction is deleted.
+5. Additional auction creation constraints and the future minimum-next-bid
+   formula.
+6. Discovery options beyond title search, the four implemented sort modes, and
+   page-number pagination.
 7. Bidder identity visibility and masking.
 8. Timeline entry type registry and public payloads.
 9. Statistics and auction-heat formulas and response shapes.
 10. Profile editing scope and seller-dashboard aggregation.
 11. Payment retry, failed-attempt, webhook, and reconciliation behavior.
-12. A dependency-readiness endpoint separate from `/health`.
-13. HTTP idempotency rules for non-bid mutations.
-14. Error-message localization and public observability/correlation metadata.
+12. HTTP idempotency rules for other non-bid mutations.
+13. Error-message localization and public observability/correlation metadata.
 
 These decisions should be added here before dependent feature work begins. They
 must not be inferred independently by the client and server.

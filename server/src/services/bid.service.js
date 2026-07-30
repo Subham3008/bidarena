@@ -1,0 +1,183 @@
+import mongoose from 'mongoose'
+
+import { env } from '../config/env.js'
+import Auction from '../models/auction.model.js'
+import Bid from '../models/bid.model.js'
+import Timeline from '../models/timeline.model.js'
+import { User } from '../models/user.model.js'
+import {
+  serializeAuctionState,
+  serializeBidState,
+  serializeTimelineState,
+} from './auction-payload.service.js'
+
+export class BidRejectedError extends Error {}
+
+function reject(message) {
+  throw new BidRejectedError(message)
+}
+
+export async function processBid({
+  auctionId,
+  bidderId,
+  amount,
+  clientBidId,
+}) {
+  if (!mongoose.isObjectIdOrHexString(auctionId)) {
+    reject('Auction not found')
+  }
+
+  const normalizedClientBidId =
+    typeof clientBidId === 'string' ? clientBidId.trim() : ''
+  const session = await mongoose.startSession()
+  let acceptedBid = null
+
+  try {
+    // Auction state, Bid, and Timeline commit together or roll back together.
+    await session.withTransaction(async () => {
+      const auction = await Auction.findById(auctionId).session(session)
+
+      if (!auction) {
+        reject('Auction not found')
+      }
+
+      if (auction.status === 'COMPLETED') {
+        reject('Auction is completed')
+      }
+
+      if (auction.status !== 'ACTIVE') {
+        reject('Auction is not active')
+      }
+
+      const now = new Date()
+
+      if (now >= auction.endAt) {
+        reject('Auction has ended')
+      }
+
+      if (auction.seller.toString() === bidderId) {
+        reject('Seller cannot bid on own auction')
+      }
+
+      if (typeof amount === 'string' && /e/i.test(amount)) {
+        reject('Exponential bid notation is not allowed')
+      }
+
+      if (!Number.isFinite(amount) || !Number.isSafeInteger(amount)) {
+        reject('Bid amount must be a finite safe integer')
+      }
+
+      if (amount <= 0) {
+        reject('Bid amount must be greater than zero')
+      }
+
+      if (amount > env.maxBidAmount) {
+        reject(`Bid amount cannot exceed ${env.maxBidAmount}`)
+      }
+
+      if (!normalizedClientBidId) {
+        reject('clientBidId is required')
+      }
+
+      // The unique index is authoritative; this pre-check gives retries a clear rejection.
+      const duplicateBid = await Bid.exists({
+        auction: auction.id,
+        clientBidId: normalizedClientBidId,
+      }).session(session)
+
+      if (duplicateBid) {
+        reject('Duplicate bid request')
+      }
+
+      const minimumBid = auction.currentBid + auction.minimumIncrement
+
+      if (
+        !Number.isFinite(minimumBid) ||
+        minimumBid > env.maxBidAmount
+      ) {
+        reject('Auction has reached the maximum bid amount')
+      }
+
+      if (amount < minimumBid) {
+        reject(`Bid must be at least ${minimumBid}`)
+      }
+
+      const bidder = await User.findById(bidderId)
+        .select('_id displayName avatar')
+        .session(session)
+        .lean()
+
+      if (!bidder) {
+        reject('Bidder account not found')
+      }
+
+      auction.currentBid = amount
+      auction.currentBidder = bidderId
+      auction.bidCount = (auction.bidCount ?? 0) + 1
+      auction.sequence = (auction.sequence ?? 0) + 1
+      auction.timelineSequence = (auction.timelineSequence ?? 0) + 1
+      auction.increment()
+      await auction.save({ session })
+
+      const [bid] = await Bid.create(
+        [
+          {
+            auction: auction.id,
+            bidder: bidderId,
+            amount,
+            clientBidId: normalizedClientBidId,
+            serverSequence: auction.sequence,
+            timestamp: now,
+          },
+        ],
+        { session },
+      )
+
+      const [timelineEvent] = await Timeline.create(
+        [
+          {
+            auction: auction.id,
+            eventType: 'BID_ACCEPTED',
+            actor: bidderId,
+            sequence: auction.timelineSequence,
+            metadata: {
+              amount,
+              bidSequence: auction.sequence,
+            },
+            timestamp: now,
+          },
+        ],
+        { session },
+      )
+
+      const auctionState = auction.toObject()
+      const bidState = bid.toObject()
+      const timelineState = timelineEvent.toObject()
+      auctionState.currentBidder = bidder
+      bidState.bidder = bidder
+      timelineState.actor = bidder
+      const latestBid = serializeBidState(bidState)
+
+      acceptedBid = {
+        auction: serializeAuctionState(auctionState),
+        bid: latestBid,
+        latestBid,
+        timelineEvent: serializeTimelineState(timelineState),
+      }
+    })
+  } catch (error) {
+    if (
+      error?.code === 11000 &&
+      (Object.hasOwn(error.keyPattern ?? {}, 'clientBidId') ||
+        Object.hasOwn(error.keyValue ?? {}, 'clientBidId'))
+    ) {
+      throw new BidRejectedError('Duplicate bid request')
+    }
+
+    throw error
+  } finally {
+    await session.endSession()
+  }
+
+  return acceptedBid
+}

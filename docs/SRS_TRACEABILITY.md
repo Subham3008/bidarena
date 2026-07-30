@@ -15,12 +15,13 @@ Derived identifiers are planning aids, not substitutes for official SRS identifi
 
 ## Status rules
 
-Only the following statuses are used during this foundation phase:
+The following statuses are currently used:
 
 - `Pending`: the requirement is described by the available source, but product implementation and verification have not begun.
+- `In Progress`: a verified implementation slice exists, but the complete requirement is not yet implemented or tested.
 - `Blocked`: the requirement identifier is known, but its authoritative wording is unavailable.
 
-No row in this document claims that a product feature is implemented, tested, integrated, or complete. Branch names below describe the future ownership workflow only; no branch creation is implied by this document.
+No row claims that a complete product feature is tested, integrated, or done. Branch names below describe the ownership workflow.
 
 ## Official SRS identifier registry
 
@@ -122,7 +123,7 @@ Every official identifier named by `BIDARENA.md` is preserved below. Ownership, 
 
 | Derived ID | Available requirement | Planned implementation area | Planned verification | Status |
 |---|---|---|---|---|
-| DA-01 | Provide registration, login, logout, validation, and session-restoration UX. | `client/src/pages`, `client/src/components`, `client/src/context` | Registration, login, logout, and refresh-restoration UI tests | Pending |
+| DA-01 | Provide registration, login, logout, validation, and session-restoration UX. | `client/src/pages`, `client/src/components`, `client/src/context` | Client lint/build pass; browser automation remains pending | Implemented |
 | DA-02 | Provide protected auction-creation UX with clear validation and submission states. | `client/src/pages`, `client/src/components` | Form validation and protected creation flow | Pending |
 | DA-03 | Provide auction discovery with upcoming, active, and completed filters. | `client/src/pages`, `client/src/services` | Discovery, filtering, loading, empty, and error states | Pending |
 | DA-04 | Present auction, product, and seller details clearly. | `client/src/pages`, `client/src/components` | Auction-details rendering and unavailable-auction states | Pending |
@@ -145,23 +146,27 @@ Every official identifier named by `BIDARENA.md` is preserved below. Ownership, 
 
 | Derived ID | Available requirement | Planned implementation area | Planned verification | Status |
 |---|---|---|---|---|
-| DB-01 | Provide backend registration/session support and derive authenticated HTTP/socket identity from verified credentials, never a client-provided `userId`. | `server/src/middleware`, `server/src/services`, `server/src/sockets` | Auth success, rejection, refresh, and socket-auth tests | Pending |
+| DB-01 | Provide backend registration/session support and derive authenticated HTTP/socket identity from verified credentials, never a client-provided `userId`. | HTTP auth implemented in `server/src/middleware`, `server/src/services`, and `server/src/models`; socket auth remains pending | Registration, duplicate email, login, invalid credentials, and protected `/me` pass | In Progress |
 | DB-02 | Persist and serve auction creation, discovery, detail, ownership, and authoritative status data. | `server/src/models`, `server/src/controllers`, `server/src/services` | Protected creation and discovery API tests | Pending |
+| DB-01 | Provide backend registration/session support and derive authenticated HTTP/socket identity from verified credentials, never a client-provided `userId`. | `server/src/middleware`, `server/src/services`, `server/src/sockets` | Auth success, rejection, refresh, and socket-auth tests | Pending |
+| DB-02 | Persist and serve auction creation, discovery, detail, ownership, and authoritative status data. | `server/src/models`, `server/src/controllers`, `server/src/services` | Protected creation and discovery API tests | In Progress |
 | DB-03 | Configure authenticated Socket.IO connections, isolated auction rooms, and participant/spectator presence. | `server/src/sockets`, `server/src/services` | Join, leave, unauthorized access, presence, and room-isolation tests | Pending |
 | DB-04 | Process bids through an independent sequential queue for each auction while allowing different auctions to progress independently. | `server/src/engine` | Simultaneous same-auction ordering and concurrent-auction isolation | Pending |
 | DB-05 | Reject unauthenticated, missing-auction, inactive, late, seller self-bid, spectator, missing, non-numeric, negative, below-minimum, duplicate, and completed-auction bids. | `server/src/validators`, `server/src/engine` | One focused test for every rejection rule | Pending |
-| DB-06 | Protect bid processing from duplicate `clientBidId` requests. | `server/src/engine`, `server/src/models` | Duplicate submission and retry/reconnect behavior | Pending |
-| DB-07 | Assign a deterministic, server-generated sequence number to every accepted bid. | `server/src/engine`, `server/src/models` | Monotonic sequence and simultaneous-bid ordering tests | Pending |
-| DB-08 | Atomically persist the auction update, bid record, timeline record, and sequence increment before cache update, broadcast, or acknowledgement. | `server/src/services`, `server/src/models` | Transaction rollback and database-before-broadcast tests | Pending |
-| DB-09 | Use absolute `startAt` and `endAt` timestamps and keep the server authoritative for auction activity and expiry. | `server/src/engine`, `server/src/jobs` | Activation, timer-expiry, clock-boundary, and late-bid tests | Pending |
-| DB-10 | Complete an auction atomically, declare at most one winner, persist completion/timeline state, reject later bids, and make the room read-only. | `server/src/engine`, `server/src/services` | Winner, no-duplicate-winner, and repeated-completion tests | Pending |
+| DB-06 | Protect bid processing from duplicate `clientBidId` requests. | `server/src/engine`, `server/src/models` | Duplicate submission and retry/reconnect behavior | In Progress |
+| DB-07 | Assign a deterministic, server-generated sequence number to every accepted bid. | `server/src/engine`, `server/src/models` | Monotonic sequence and simultaneous-bid ordering tests | In Progress |
+| DB-08 | Atomically persist the auction update, bid record, timeline record, and sequence increment before cache update, broadcast, or acknowledgement. | `server/src/services`, `server/src/models` | Transaction rollback and database-before-broadcast tests | In Progress |
+| DB-09 | Use absolute `startAt` and `endAt` timestamps and keep the server authoritative for auction activity and expiry. | Startup lifecycle recovery implemented in `server/src/services/auction-lifecycle.service.js`; live scheduling remains pending | Due activation and expired completion recovery tests pass | In Progress |
+| DB-10 | Complete an auction atomically, declare at most one winner, persist completion/timeline state, reject later bids, and make the room read-only. | Atomic completion and winner persistence implemented in `server/src/services/auction-lifecycle.service.js`; live-room behavior remains pending | Winner and repeated-completion guard tests pass | In Progress |
 | DB-11 | Produce a full authoritative snapshot for browser refresh and socket reconnection recovery. | `server/src/services`, `server/src/sockets` | Snapshot contents, stale-state replacement, and reconnect tests | Pending |
-| DB-12 | On server startup, inspect upcoming/active auctions, safely complete expired auctions, restore timers and relevant cache, and prevent duplicate winners. | `server/src/jobs`, `server/src/services` | Server-restart and expired-auction recovery tests | Pending |
-| DB-13 | Persist timeline events and calculate authoritative live statistics and auction heat. | `server/src/models`, `server/src/services` | Timeline persistence and calculation tests | Pending |
+| DB-12 | On server startup, inspect upcoming/active auctions, safely complete expired auctions, restore timers and relevant cache, and prevent duplicate winners. | Database-first startup recovery implemented in `server/src/server.js` and lifecycle service; timers/cache remain pending | Idempotent startup transition tests pass | In Progress |
+| DB-13 | Persist timeline events and calculate authoritative live statistics and auction heat. | `server/src/models`, `server/src/services` | Timeline persistence and calculation tests | In Progress |
 | DB-14 | Isolate chat by auction room and keep chat validation or persistence failure outside the bid-processing path. | `server/src/sockets`, `server/src/services` | Cross-room leakage and chat-failure-isolation tests | Pending |
 | DB-15 | Verify winner identity, create Razorpay test orders, verify signatures server-side, persist payment status separately from auction status, and broadcast payment updates. | `server/src/controllers`, `server/src/services` | Order authorization, signature verification, and payment-failure tests | Pending |
 | DB-16 | Use Redis only for clearly documented cache, presence, idempotency, locking, rate limiting, or Socket.IO scaling responsibilities while retaining MongoDB as the permanent source of truth. | `server/src/config`, `server/src/services` | Redis availability, fallback, invalidation, TTL, and restart tests | Pending |
 | DB-17 | Provide focused backend tests for engine correctness, persistence, concurrency, recovery, payment, Redis fallback, and fault tolerance. | `server/src/tests` | Backend test suite and startup evidence | Pending |
+
+Model evidence: `auction.model.js`, `bid.model.js`, and `timeline.model.js` now provide validated persistence schemas, ordering indexes, and auction-scoped bid idempotency. Engine services, atomic transactions, and behavioral tests remain pending.
 
 ### Shared integration
 
@@ -171,7 +176,7 @@ Every official identifier named by `BIDARENA.md` is preserved below. Ownership, 
 | Derived ID | Available requirement | Planned integration scope | Planned verification | Status |
 |---|---|---|---|---|
 | SI-01 | Freeze matching REST, Socket.IO, authentication, error, status, time, and payload contracts before feature development. | Client/server contract documents and shared conventions | Contract review and client/server payload compatibility | Pending |
-| SI-02 | Integrate registration, login, logout, authenticated requests, socket authentication, and refresh restoration. | Domain A auth UX plus Domain B auth services | End-to-end registration, login, logout, and refresh tests | Pending |
+| SI-02 | Integrate registration, login, logout, authenticated requests, socket authentication, and refresh restoration. | HTTP cookie session and client restoration implemented; socket authentication and refresh rotation remain pending | HTTP auth integration tests pass; browser and socket tests remain pending | In Progress |
 | SI-03 | Integrate protected auction creation, discovery, filtering, and details. | Domain A marketplace UX plus Domain B auction APIs | End-to-end marketplace flow | Pending |
 | SI-04 | Integrate two-browser bidding with valid, invalid, duplicate, simultaneous, ordered, and authoritative updates. | Domain A room/bid UX plus Domain B bid engine | Two-browser race and rejection suite | Pending |
 | SI-05 | Integrate server-owned timing, visual countdown, late-bid rejection, auction completion, winner display, and read-only state. | Domain A timer/completion UX plus Domain B timer/winner engine | Clock synchronization and completion flow | Pending |
