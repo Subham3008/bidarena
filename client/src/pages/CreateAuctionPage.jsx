@@ -24,22 +24,23 @@ export function CreateAuctionPage() {
   }
 
   return (
-    <div className="min-h-screen bg-stone-100 text-stone-950">
+    <div className="app-shell">
       <MarketplaceHeader />
-      <main className="mx-auto max-w-4xl px-4 py-8 sm:px-6 sm:py-10">
+      <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-12">
         <Link
           to="/dashboard"
-          className="inline-flex items-center gap-2 text-sm font-medium text-stone-600 hover:text-stone-950 focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:ring-offset-2"
+          className="inline-flex min-h-11 items-center gap-2 rounded-md text-sm font-semibold text-stone-600 hover:text-stone-950 focus-visible:ring-2 focus-visible:ring-emerald-700 focus-visible:ring-offset-2"
         >
           <ArrowLeft size={16} aria-hidden="true" />
           Back to dashboard
         </Link>
 
-        <header className="mt-6 max-w-2xl">
-          <p className="text-sm font-semibold text-emerald-800">New listing</p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight">Create an auction</h1>
-          <p className="mt-2 text-stone-600">
-            Add accurate item details, upload a clear image, and choose a reliable schedule.
+        <header className="mt-6 max-w-3xl">
+          <p className="page-kicker">New listing</p>
+          <h1 className="page-title mt-2">Create an auction</h1>
+          <p className="page-description mt-3">
+            Add accurate item details, upload a clear image, and choose a
+            reliable schedule.
           </p>
         </header>
 

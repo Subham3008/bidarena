@@ -10,27 +10,34 @@ import { useAuth } from '../hooks/useAuth.js'
 import { fetchAuction, updateAuction } from '../services/auctions.js'
 import { toDateTimeLocal } from '../utils/dates.js'
 
-function StateMessage({ title, message, auctionId }) {
+function StateMessage({ title, message, auctionId, onRetry }) {
   return (
-    <div className="min-h-screen bg-stone-100 text-stone-950">
+    <div className="app-shell">
       <MarketplaceHeader />
-      <main className="mx-auto max-w-2xl px-4 py-16 text-center sm:px-6">
-        <span className="mx-auto grid h-12 w-12 place-items-center bg-stone-200 text-stone-700">
+      <main className="mx-auto max-w-2xl px-4 py-16 text-center sm:px-6 sm:py-24">
+        <span className="mx-auto grid h-12 w-12 place-items-center rounded-lg bg-stone-200 text-stone-700">
           <LockKeyhole size={22} aria-hidden="true" />
         </span>
-        <h1 className="mt-5 text-2xl font-semibold">{title}</h1>
-        <p className="mx-auto mt-2 max-w-lg text-stone-600">{message}</p>
+        <h1 className="mt-5 text-3xl font-semibold tracking-tight">{title}</h1>
+        <p className="mx-auto mt-3 max-w-lg leading-7 text-stone-600">
+          {message}
+        </p>
         <div className="mt-6 flex flex-wrap justify-center gap-3">
+          {onRetry ? (
+            <button type="button" onClick={onRetry} className="btn-primary">
+              Try again
+            </button>
+          ) : null}
           <Link
             to="/dashboard"
-            className="rounded-sm border border-stone-300 bg-white px-4 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:ring-offset-2"
+            className="btn-secondary"
           >
             Back to dashboard
           </Link>
           {auctionId ? (
             <Link
               to={`/auctions/${auctionId}`}
-              className="rounded-sm bg-emerald-800 px-4 py-2 text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:ring-offset-2"
+              className="btn-primary"
             >
               View auction
             </Link>
@@ -55,9 +62,13 @@ export function EditAuctionPage() {
 
   if (auctionQuery.isPending) {
     return (
-      <div className="min-h-screen bg-stone-100 text-stone-950">
+      <div className="app-shell">
         <MarketplaceHeader />
-        <main className="mx-auto max-w-4xl animate-pulse px-4 py-10 sm:px-6" aria-label="Loading auction editor">
+        <main
+          className="mx-auto max-w-5xl animate-pulse px-4 py-10 sm:px-6"
+          aria-label="Loading auction editor"
+          role="status"
+        >
           <div className="h-4 w-36 bg-stone-200" />
           <div className="mt-7 h-10 w-72 max-w-full bg-stone-200" />
           <div className="mt-8 h-80 border border-stone-200 bg-white" />
@@ -67,10 +78,18 @@ export function EditAuctionPage() {
   }
 
   if (auctionQuery.isError) {
+    const status = auctionQuery.error.response?.status
+    const unavailable = status === 400 || status === 404
+
     return (
       <StateMessage
-        title="Auction unavailable"
-        message="This auction could not be loaded. It may have been removed, or the link may be invalid."
+        title={unavailable ? 'Auction unavailable' : 'Unable to load auction'}
+        message={
+          unavailable
+            ? 'This auction may have been removed, or the link may be invalid.'
+            : 'Check your connection and retry before returning to the dashboard.'
+        }
+        onRetry={unavailable ? undefined : () => auctionQuery.refetch()}
       />
     )
   }
@@ -123,22 +142,23 @@ export function EditAuctionPage() {
   }
 
   return (
-    <div className="min-h-screen bg-stone-100 text-stone-950">
+    <div className="app-shell">
       <MarketplaceHeader />
-      <main className="mx-auto max-w-4xl px-4 py-8 sm:px-6 sm:py-10">
+      <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-12">
         <Link
           to="/dashboard"
-          className="inline-flex items-center gap-2 text-sm font-medium text-stone-600 hover:text-stone-950 focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:ring-offset-2"
+          className="inline-flex min-h-11 items-center gap-2 rounded-md text-sm font-semibold text-stone-600 hover:text-stone-950 focus-visible:ring-2 focus-visible:ring-emerald-700 focus-visible:ring-offset-2"
         >
           <ArrowLeft size={16} aria-hidden="true" />
           Back to dashboard
         </Link>
 
-        <header className="mt-6 max-w-2xl">
-          <p className="text-sm font-semibold text-emerald-800">Seller tools</p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight">Edit auction</h1>
-          <p className="mt-2 text-stone-600">
-            Update this upcoming auction before bidding begins. Ownership and live state remain server-controlled.
+        <header className="mt-6 max-w-3xl">
+          <p className="page-kicker">Seller tools</p>
+          <h1 className="page-title mt-2">Edit auction</h1>
+          <p className="page-description mt-3">
+            Update “{auction.title}” before bidding begins. Ownership and live
+            state remain server-controlled.
           </p>
         </header>
 

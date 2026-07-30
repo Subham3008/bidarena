@@ -326,6 +326,7 @@ export function AuctionPaymentCard({
   const sellerId = identityId(auction?.seller)
   const liveWinnerId = identityId(auction?.winner)
   const isCompleted = auction?.status === 'COMPLETED'
+  const isSellerViewer = Boolean(userId && sellerId && userId === sellerId)
   const isLikelyViewer = userId === sellerId || userId === liveWinnerId
   const queryEnabled = Boolean(
     auctionId &&
@@ -833,16 +834,24 @@ export function AuctionPaymentCard({
     payment.status === 'PAID'
       ? 'Payment is confirmed by BidArena.'
       : PHASE_MESSAGES[checkoutState.phase] ?? checkoutState.notice
+  const paymentSubtitle =
+    payment.status === 'PAID'
+      ? 'Confirmed by BidArena after server verification'
+      : isSellerViewer
+        ? 'Read-only payment status for the auction seller'
+        : canCheckout
+          ? 'Secure checkout for the persisted auction winner'
+          : 'Authoritative winner-payment status'
 
   return (
     <section
-      className="mt-4 min-w-0 border border-stone-200 bg-stone-50 p-4 sm:p-5"
+      className="surface-elevated relative mt-5 min-w-0 overflow-hidden p-4 before:absolute before:inset-x-0 before:top-0 before:h-1 before:bg-[var(--color-green-primary)] sm:p-5"
       aria-labelledby="auction-payment-title"
       aria-busy={paymentQuery.isPending || isBusy}
     >
       <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3">
-          <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center bg-emerald-100 text-emerald-800">
+          <span className="mt-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--color-green-soft)] text-[var(--color-green-primary)]">
             <CreditCard size={18} aria-hidden="true" />
           </span>
           <div className="min-w-0">
@@ -852,9 +861,7 @@ export function AuctionPaymentCard({
             >
               Winner payment
             </h2>
-            <p className="mt-1 text-sm text-stone-600">
-              Authorised and verified by BidArena
-            </p>
+            <p className="mt-1 text-sm text-stone-600">{paymentSubtitle}</p>
           </div>
         </div>
         <span
@@ -884,7 +891,7 @@ export function AuctionPaymentCard({
           <button
             type="button"
             onClick={() => paymentQuery.refetch()}
-            className="mt-3 inline-flex items-center gap-2 rounded-sm border border-stone-300 bg-white px-3 py-2 text-sm font-semibold text-stone-800 hover:bg-stone-100 focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:ring-offset-2"
+            className="btn-secondary mt-3"
           >
             <RefreshCw size={15} aria-hidden="true" />
             Retry status
@@ -892,7 +899,7 @@ export function AuctionPaymentCard({
         </div>
       ) : (
         <>
-          <dl className="mt-5 grid min-w-0 gap-4 text-sm sm:grid-cols-2">
+          <dl className="surface-muted mt-5 grid min-w-0 gap-4 p-4 text-sm sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
             <div className="min-w-0">
               <dt className="text-xs font-semibold uppercase tracking-wide text-stone-500">
                 Auction
@@ -906,7 +913,7 @@ export function AuctionPaymentCard({
                 Winning amount
               </dt>
               <dd
-                className="mt-1 break-words font-semibold tabular-nums text-stone-950"
+                className="mt-1 break-words text-[clamp(1.25rem,4vw,1.65rem)] font-bold leading-tight tracking-tight tabular-nums text-stone-950 [overflow-wrap:anywhere]"
                 title={
                   hasValidAmount
                     ? formatCurrency(payment.amount / 100)
@@ -921,10 +928,13 @@ export function AuctionPaymentCard({
           </dl>
 
           {payment.status === 'PAID' ? (
-            <div className="mt-5 border-l-2 border-emerald-700 pl-3">
+            <div className="mt-5 rounded-[var(--radius-md)] border border-emerald-200 bg-[var(--color-green-soft)] p-4">
               <p className="flex items-center gap-2 text-sm font-semibold text-emerald-900">
                 <CheckCircle2 size={17} aria-hidden="true" />
                 Payment verified
+              </p>
+              <p className="mt-1 text-sm text-stone-700">
+                No further payment action is required.
               </p>
               {verifiedAt ? (
                 <p className="mt-1 text-xs text-stone-600">
@@ -940,8 +950,9 @@ export function AuctionPaymentCard({
 
           {payment.status === 'PENDING' && !isBackendWinner ? (
             <p className="mt-5 text-sm text-stone-600">
-              The winner has not completed payment yet. Checkout controls
-              are available only to the persisted winner.
+              {isSellerViewer
+                ? 'Winner payment is still pending. This seller view is read-only and will update after server verification.'
+                : 'The winner has not completed payment yet. Checkout controls are available only to the persisted winner.'}
             </p>
           ) : null}
 
@@ -969,7 +980,7 @@ export function AuctionPaymentCard({
           ) : null}
 
           {checkoutState.isTestMode && payment.status !== 'PAID' ? (
-            <p className="mt-4 flex items-start gap-2 text-xs text-stone-600">
+            <p className="mt-4 flex items-start gap-2 rounded-[var(--radius-sm)] border border-stone-200 bg-white p-3 text-xs text-stone-600">
               <ShieldCheck
                 size={15}
                 className="mt-0.5 shrink-0 text-emerald-800"
@@ -1007,7 +1018,7 @@ export function AuctionPaymentCard({
                 type="button"
                 onClick={handlePay}
                 disabled={isBusy || checkoutState.canRetryVerification}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-sm bg-emerald-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-emerald-900 focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-stone-400 sm:w-auto"
+                className="btn-primary w-full px-5 sm:w-auto"
               >
                 {isBusy ? (
                   <LoaderCircle
@@ -1034,7 +1045,7 @@ export function AuctionPaymentCard({
                   type="button"
                   onClick={handleVerificationRetry}
                   disabled={isBusy}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-sm border border-emerald-800 bg-white px-4 py-2.5 text-sm font-semibold text-emerald-900 hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:ring-offset-2 disabled:cursor-not-allowed disabled:border-stone-300 disabled:text-stone-500 sm:w-auto"
+                  className="btn-secondary w-full px-4 sm:w-auto"
                 >
                   <RefreshCw size={15} aria-hidden="true" />
                   Retry verification

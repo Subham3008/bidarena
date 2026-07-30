@@ -53,92 +53,88 @@ export function AuctionCard({ auction, className = '' }) {
   return (
     <article
       data-auction-card
-      className={`group flex h-full min-w-0 flex-col overflow-hidden rounded-md border border-stone-200 bg-white shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-stone-300 hover:shadow-md motion-reduce:transform-none motion-reduce:transition-none ${className}`}
+      className={`surface-card h-full min-w-0 overflow-hidden transition duration-200 hover:-translate-y-0.5 hover:border-stone-300 hover:shadow-[var(--shadow-raised)] motion-reduce:transform-none motion-reduce:transition-none ${className}`}
     >
       <Link
         to={`/auctions/${auction._id}`}
-        className="relative block aspect-[4/3] overflow-hidden bg-stone-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-700"
+        className="group flex h-full min-w-0 flex-col rounded-[var(--radius-lg)] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-green-primary)]"
         aria-label={`View ${auction.title}`}
       >
-        {!imageFailed && auction.image ? (
-          <img
-            src={auction.image}
-            alt=""
-            className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02] motion-reduce:transform-none motion-reduce:transition-none"
-            loading="lazy"
-            onError={() => setFailedImageUrl(auction.image)}
-          />
-        ) : (
-          <div className="grid h-full place-items-center px-4 text-center text-sm text-stone-500">
-            Image unavailable
-          </div>
-        )}
-        <span
-          className={`absolute left-3 top-3 rounded-full px-2.5 py-1 text-xs font-semibold shadow-sm ring-1 ring-inset ${STATUS_STYLES[auction.status] ?? STATUS_STYLES.COMPLETED}`}
-        >
-          {STATUS_LABELS[auction.status] ?? auction.status}
-        </span>
-      </Link>
-
-      <div className="flex flex-1 flex-col p-4 sm:p-5">
-        <div className="min-w-0">
-          <h2 className="line-clamp-2 min-h-12 text-base font-semibold leading-6 text-stone-950">
-            <Link
-              to={`/auctions/${auction._id}`}
-              className="rounded-sm outline-none hover:text-emerald-800 focus-visible:ring-2 focus-visible:ring-emerald-700 focus-visible:ring-offset-2"
-            >
-              {auction.title}
-            </Link>
-          </h2>
-          <p className="mt-1.5 flex min-w-0 items-center gap-1.5 text-sm text-stone-500">
-            <UserRound size={14} className="shrink-0" aria-hidden="true" />
-            <span className="truncate">
-              {auction.seller?.name ?? 'BidArena seller'}
-            </span>
-          </p>
-        </div>
-
-        <div className="mt-5 flex min-w-0 items-end justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium uppercase tracking-wide text-stone-500">
-              {priceLabel}
-            </p>
-            <p
-              className="mt-1 min-w-0 break-words text-xl font-semibold leading-tight text-stone-950"
-              title={price.exact}
-              aria-label={`${priceLabel}: ${price.exact}`}
-            >
-              {price.display}
-            </p>
-          </div>
-          <p className="shrink-0 pb-0.5 text-sm text-stone-500">
-            {bidCount} {bidCount === 1 ? 'bid' : 'bids'}
-          </p>
-        </div>
-
-        <div className="mt-auto pt-4">
-          <p className="flex items-start gap-2 border-t border-stone-100 pt-4 text-sm leading-5 text-stone-600">
-            <CalendarClock
-              size={16}
-              className="mt-0.5 shrink-0"
-              aria-hidden="true"
+        <div className="relative aspect-[16/10] overflow-hidden bg-stone-100">
+          {!imageFailed && auction.image ? (
+            <img
+              src={auction.image}
+              alt=""
+              className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.025] motion-reduce:transform-none motion-reduce:transition-none"
+              loading="lazy"
+              onError={() => setFailedImageUrl(auction.image)}
             />
-            {schedule.dateTime ? (
-              <time dateTime={schedule.dateTime}>{schedule.label}</time>
-            ) : (
-              schedule.label
-            )}
-          </p>
-
-          <Link
-            to={`/auctions/${auction._id}`}
-            className="mt-4 flex w-full items-center justify-center gap-2 rounded-sm border border-stone-300 px-3 py-2.5 text-sm font-semibold text-stone-800 transition hover:border-emerald-700 hover:text-emerald-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 focus-visible:ring-offset-2"
+          ) : (
+            <div className="grid h-full place-items-center px-4 text-center text-sm font-medium text-stone-500">
+              Image unavailable
+            </div>
+          )}
+          <span
+            className={`absolute left-3 top-3 rounded-[var(--radius-sm)] px-2.5 py-1 text-xs font-semibold shadow-sm ring-1 ring-inset ${STATUS_STYLES[auction.status] ?? STATUS_STYLES.COMPLETED}`}
           >
-            View auction
-            <ArrowUpRight size={16} aria-hidden="true" />
-          </Link>
+            {STATUS_LABELS[auction.status] ?? auction.status}
+          </span>
         </div>
-      </div>
+
+        <div className="flex flex-1 flex-col p-5">
+          <div className="min-w-0">
+            <h2 className="line-clamp-2 min-h-13 text-lg font-bold leading-[1.45] tracking-[-0.015em] text-stone-950 transition group-hover:text-[var(--color-green-hover)]">
+              {auction.title}
+            </h2>
+            <p className="mt-2 flex min-w-0 items-center gap-1.5 text-sm text-stone-500">
+              <UserRound size={15} className="shrink-0" aria-hidden="true" />
+              <span className="truncate">
+                {auction.seller?.name ?? 'BidArena seller'}
+              </span>
+            </p>
+          </div>
+
+          <div className="mt-5 flex min-w-0 items-end justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-stone-500">
+                {priceLabel}
+              </p>
+              <p
+                className="mt-1.5 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-2xl font-bold leading-tight tracking-[-0.025em] text-stone-950 tabular-nums"
+                title={price.exact}
+                aria-label={`${priceLabel}: ${price.exact}`}
+              >
+                {price.display}
+              </p>
+            </div>
+            <p className="shrink-0 pb-0.5 text-sm font-medium text-stone-500 tabular-nums">
+              {bidCount} {bidCount === 1 ? 'bid' : 'bids'}
+            </p>
+          </div>
+
+          <div className="mt-auto pt-5">
+            <p className="flex min-h-16 items-start gap-2 rounded-[var(--radius-md)] bg-stone-50 px-3 py-3 text-sm leading-5 text-stone-600">
+              <CalendarClock
+                size={16}
+                className="mt-0.5 shrink-0 text-stone-500"
+                aria-hidden="true"
+              />
+              {schedule.dateTime ? (
+                <time dateTime={schedule.dateTime}>{schedule.label}</time>
+              ) : (
+                schedule.label
+              )}
+            </p>
+
+            <span
+              className="btn-secondary mt-4 w-full group-hover:border-[var(--color-green-primary)] group-hover:text-[var(--color-green-hover)]"
+            >
+              View auction
+              <ArrowUpRight size={16} aria-hidden="true" />
+            </span>
+          </div>
+        </div>
+      </Link>
     </article>
   )
 }
