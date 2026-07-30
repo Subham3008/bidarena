@@ -3,13 +3,16 @@ import {
   ArrowLeft,
   CalendarDays,
   CircleDot,
-  Gavel,
   Radio,
-  Users,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
+import {
+  AuctionChatPanel,
+  AuctionHeatBadge,
+  AuctionInsightsPanel,
+} from '../components/AuctionRoomPanels.jsx'
 import { MarketplaceHeader } from '../components/MarketplaceHeader.jsx'
 import { useAuctionRoom } from '../hooks/useAuctionRoom.js'
 import { useAuth } from '../hooks/useAuth.js'
@@ -23,18 +26,20 @@ const STATUS_LABELS = {
   UPCOMING: 'Upcoming',
   ACTIVE: 'Live',
   COMPLETED: 'Completed',
+  CANCELLED: 'Cancelled',
 }
 
 const STATUS_STYLES = {
   UPCOMING: 'bg-amber-50 text-amber-800 ring-amber-200',
   ACTIVE: 'bg-emerald-50 text-emerald-800 ring-emerald-200',
   COMPLETED: 'bg-stone-100 text-stone-700 ring-stone-200',
+  CANCELLED: 'bg-red-50 text-red-800 ring-red-200',
 }
 
 const PARTIAL_CURRENCY_PATTERN = /^\d*(?:\.\d{0,2})?$/
 const COMPLETE_CURRENCY_PATTERN = /^\d+(?:\.\d{1,2})?$/
 const BLOCKED_BID_KEYS = new Set(['e', 'E', '+', '-', ' '])
-const MOBILE_ACTIVITY_TABS = ['bids', 'timeline', 'participants']
+const MOBILE_ACTIVITY_TABS = ['activity', 'chat', 'insights']
 const MAX_SAFE_AMOUNT = BigInt(Number.MAX_SAFE_INTEGER)
 
 function parseSafeBidAmount(value) {
@@ -124,18 +129,41 @@ function useServerCountdown(endAt, serverTime) {
     : 0
 }
 
+function useCompactRoomTabs() {
+  const [isCompact, setIsCompact] = useState(() =>
+    typeof window === 'undefined' || !window.matchMedia
+      ? true
+      : window.matchMedia('(max-width: 1023px)').matches,
+  )
+
+  useEffect(() => {
+    if (!window.matchMedia) {
+      return undefined
+    }
+
+    const mediaQuery = window.matchMedia('(max-width: 1023px)')
+    const handleChange = () => setIsCompact(mediaQuery.matches)
+
+    handleChange()
+    mediaQuery.addEventListener('change', handleChange)
+    return () => mediaQuery.removeEventListener('change', handleChange)
+  }, [])
+
+  return isCompact
+}
+
 function DetailsSkeleton() {
   return (
     <main className="mx-auto max-w-7xl animate-pulse px-4 py-8 sm:px-6 lg:px-8">
       <div className="h-5 w-36 bg-stone-200" />
       <div className="mt-8 grid gap-6 lg:grid-cols-12">
-        <div className="space-y-4 lg:col-span-4">
+        <div className="space-y-4 lg:col-span-5 xl:col-span-3">
           <div className="aspect-[4/3] bg-stone-200" />
           <div className="h-8 w-3/4 bg-stone-200" />
           <div className="h-20 bg-stone-200" />
         </div>
-        <div className="h-[30rem] bg-white ring-1 ring-stone-200 lg:col-span-5" />
-        <div className="h-72 bg-white ring-1 ring-stone-200 lg:col-span-3" />
+        <div className="h-[30rem] bg-white ring-1 ring-stone-200 lg:col-span-7 xl:col-span-5" />
+        <div className="h-72 bg-white ring-1 ring-stone-200 lg:col-span-12 xl:col-span-4" />
       </div>
     </main>
   )
@@ -360,78 +388,14 @@ function TimelineList({ timeline, identities, auction }) {
   )
 }
 
-function ParticipantPanel({
-  role,
-  activeBidderCount,
-  spectatorCount,
-  connectionLabel,
-  connectionState,
-  auctionStatus,
-}) {
-  const roleText = {
-    SELLER: 'You are the seller. Bidding is disabled.',
-    BIDDER:
-      auctionStatus === 'COMPLETED'
-        ? 'You joined as a bidder. This auction is complete.'
-        : 'You can submit bids while this auction is active.',
-    SPECTATOR: 'You are viewing this auction in read-only mode.',
-  }
-
-  return (
-    <div className="space-y-5">
-      <div className="flex items-center justify-between gap-3">
-        <span
-          className={`flex items-center gap-2 text-sm font-medium ${
-            connectionState === 'connected'
-              ? 'text-emerald-800'
-              : 'text-amber-800'
-          }`}
-        >
-          <Radio size={14} aria-hidden="true" /> {connectionLabel}
-        </span>
-        <span className="rounded-full bg-stone-100 px-2.5 py-1 text-xs font-semibold text-stone-700 ring-1 ring-inset ring-stone-200">
-          {role ?? 'Synchronising'}
-        </span>
-      </div>
-      <div>
-        <p className="mt-1 text-sm leading-6 text-stone-600">
-          {roleText[role] ?? 'Waiting for the server-provided room role.'}
-        </p>
-      </div>
-
-      <dl className="grid grid-cols-2 gap-3">
-        <div className="border border-stone-200 bg-stone-50 p-3">
-          <dt className="flex items-center gap-2 text-xs text-stone-500">
-            <Gavel size={14} aria-hidden="true" /> Bidders
-          </dt>
-          <dd className="mt-2 text-2xl font-semibold tabular-nums">
-            {activeBidderCount}
-          </dd>
-        </div>
-        <div className="border border-stone-200 bg-stone-50 p-3">
-          <dt className="flex items-center gap-2 text-xs text-stone-500">
-            <Users size={14} aria-hidden="true" /> Spectators
-          </dt>
-          <dd className="mt-2 text-2xl font-semibold tabular-nums">
-            {spectatorCount}
-          </dd>
-        </div>
-      </dl>
-
-      <p className="text-sm leading-6 text-stone-500">
-        Counts reflect the participants currently connected to this room.
-      </p>
-    </div>
-  )
-}
-
 export function AuctionDetailsPage() {
   const { auctionId } = useParams()
   const { user, isRestoringSession } = useAuth()
   const [failedImageUrl, setFailedImageUrl] = useState('')
   const [bidAmount, setBidAmount] = useState('')
   const [inputError, setInputError] = useState('')
-  const [mobileTab, setMobileTab] = useState('bids')
+  const [mobileTab, setMobileTab] = useState('activity')
+  const usesCompactRoomTabs = useCompactRoomTabs()
   const auctionQuery = useQuery({
     queryKey: ['auction', auctionId],
     queryFn: ({ signal }) => fetchAuction(auctionId, signal),
@@ -482,6 +446,10 @@ export function AuctionDetailsPage() {
     auction?.status === 'ACTIVE' &&
     room.connectionState === 'connected' &&
     room.isSynced
+
+  useEffect(() => {
+    setMobileTab('activity')
+  }, [auctionId])
 
   useEffect(() => {
     if (auction?.status === 'COMPLETED') {
@@ -607,21 +575,23 @@ export function AuctionDetailsPage() {
   }[room.connectionState]
   const statusLabel = STATUS_LABELS[auction.status] ?? auction.status
   const readOnlyReason =
-    auction.status === 'COMPLETED'
-      ? 'This auction is complete.'
-      : room.connectionState !== 'connected'
-        ? 'Bidding is paused while the live connection reconnects.'
-        : role === 'SELLER'
-          ? 'Sellers cannot bid on their own auctions.'
-          : role === 'SPECTATOR'
-            ? user
-              ? 'This room is read-only for your current connection.'
-              : 'Sign in to join as a bidder.'
-            : auction.status === 'UPCOMING'
-              ? 'Bidding opens when the server starts the auction.'
-              : !room.isSynced
-                ? 'Waiting for authoritative room state.'
-                : ''
+    auction.status === 'CANCELLED'
+      ? 'This auction was cancelled.'
+      : auction.status === 'COMPLETED'
+        ? 'This auction is complete.'
+        : room.connectionState !== 'connected'
+          ? 'Bidding is paused while the live connection reconnects.'
+          : role === 'SELLER'
+            ? 'Sellers cannot bid on their own auctions.'
+            : role === 'SPECTATOR'
+              ? user
+                ? 'This room is read-only for your current connection.'
+                : 'Sign in to join as a bidder.'
+              : auction.status === 'UPCOMING'
+                ? 'Bidding opens when the server starts the auction.'
+                : !room.isSynced
+                  ? 'Waiting for authoritative room state.'
+                  : ''
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-stone-100 text-stone-950">
@@ -641,7 +611,10 @@ export function AuctionDetailsPage() {
         ) : null}
 
         <div className="mt-7 grid gap-6 lg:grid-cols-12 lg:items-start">
-          <section className="lg:col-span-4" aria-labelledby="auction-title">
+          <section
+            className="lg:col-span-5 xl:col-span-3"
+            aria-labelledby="auction-title"
+          >
             <div className="aspect-[4/3] overflow-hidden border border-stone-200 bg-stone-200">
               {!imageFailed ? (
                 <img
@@ -701,14 +674,20 @@ export function AuctionDetailsPage() {
             </dl>
           </section>
 
-          <section className="space-y-6 lg:col-span-5" aria-label="Live auction">
+          <section
+            className="space-y-6 lg:col-span-7 xl:col-span-5"
+            aria-label="Live auction"
+          >
             <div className="border border-stone-200 bg-white p-5 sm:p-6">
-              <div className="flex items-center justify-between gap-4">
-                <span
-                  className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${STATUS_STYLES[auction.status] ?? STATUS_STYLES.COMPLETED}`}
-                >
-                  {statusLabel}
-                </span>
+              <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <span
+                    className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${STATUS_STYLES[auction.status] ?? STATUS_STYLES.COMPLETED}`}
+                  >
+                    {statusLabel}
+                  </span>
+                  <AuctionHeatBadge heat={room.auctionHeat} />
+                </div>
                 <span className="flex items-center gap-2 text-xs font-medium text-stone-500">
                   <Radio
                     size={14}
@@ -882,7 +861,7 @@ export function AuctionDetailsPage() {
               </form>
             </div>
 
-            <div className="hidden space-y-6 lg:block">
+            <div className="hidden space-y-6 xl:block">
               <section className="border border-stone-200 bg-white p-5">
                 <h2 className="font-semibold">Recent bids</h2>
                 <BidList
@@ -901,25 +880,15 @@ export function AuctionDetailsPage() {
             </div>
           </section>
 
-          <aside className="hidden border border-stone-200 bg-white p-5 lg:col-span-3 lg:block">
-            <h2 className="font-semibold">Room information</h2>
-            <div className="mt-5">
-              <ParticipantPanel
-                role={role}
-                activeBidderCount={room.snapshot?.activeBidderCount ?? 0}
-                spectatorCount={room.snapshot?.spectatorCount ?? 0}
-                connectionLabel={connectionLabel}
-                connectionState={room.connectionState}
-                auctionStatus={auction.status}
-              />
-            </div>
-          </aside>
-
-          <section className="lg:hidden lg:col-span-12" aria-label="Auction activity">
+          <section
+            className="min-w-0 lg:col-span-12 xl:col-span-4"
+            aria-label="Auction room workspace"
+          >
             <div
-              className="flex border-b border-stone-300"
+              className="flex border-b border-stone-300 lg:hidden"
               role="tablist"
               aria-orientation="horizontal"
+              aria-label="Auction room sections"
             >
               {MOBILE_ACTIVITY_TABS.map((tab) => (
                 <button
@@ -928,7 +897,7 @@ export function AuctionDetailsPage() {
                   type="button"
                   role="tab"
                   aria-selected={mobileTab === tab}
-                  aria-controls="mobile-auction-activity-panel"
+                  aria-controls={`mobile-auction-${tab}-panel`}
                   tabIndex={mobileTab === tab ? 0 : -1}
                   data-activity-tab={tab}
                   onClick={() => setMobileTab(tab)}
@@ -943,36 +912,114 @@ export function AuctionDetailsPage() {
                 </button>
               ))}
             </div>
+
             <div
-              id="mobile-auction-activity-panel"
-              role="tabpanel"
-              aria-labelledby={`mobile-auction-activity-tab-${mobileTab}`}
-              tabIndex="0"
-              className="border border-t-0 border-stone-200 bg-white p-5 outline-none focus:ring-2 focus:ring-inset focus:ring-emerald-700"
+              className="min-w-0 lg:grid lg:grid-cols-3 lg:items-start lg:gap-6 xl:grid-cols-1"
             >
-              {mobileTab === 'bids' ? (
-                <BidList
-                  bids={room.snapshot?.latestBids}
-                  identities={identities}
-                />
-              ) : null}
-              {mobileTab === 'timeline' ? (
-                <TimelineList
-                  timeline={room.snapshot?.timeline}
-                  identities={identities}
-                  auction={auction}
-                />
-              ) : null}
-              {mobileTab === 'participants' ? (
-                <ParticipantPanel
+              <div
+                id="mobile-auction-activity-panel"
+                role={usesCompactRoomTabs ? 'tabpanel' : undefined}
+                aria-labelledby={
+                  usesCompactRoomTabs
+                    ? 'mobile-auction-activity-tab-activity'
+                    : undefined
+                }
+                tabIndex={
+                  usesCompactRoomTabs && mobileTab === 'activity'
+                    ? 0
+                    : undefined
+                }
+                className={`min-w-0 space-y-6 border border-t-0 border-stone-200 bg-white p-5 outline-none focus:ring-2 focus:ring-inset focus:ring-emerald-700 lg:block lg:border-0 lg:bg-transparent lg:p-0 xl:hidden ${
+                  mobileTab === 'activity' ? 'block' : 'hidden'
+                }`}
+              >
+                <section className="min-w-0 border border-stone-200 bg-white p-4">
+                  <h2 className="font-semibold">Recent bids</h2>
+                  <div className="mt-2 max-h-80 overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]">
+                    <BidList
+                      bids={room.snapshot?.latestBids}
+                      identities={identities}
+                    />
+                  </div>
+                </section>
+                <section className="min-w-0 border border-stone-200 bg-white p-4">
+                  <h2 className="font-semibold">Timeline</h2>
+                  <div className="mt-2 max-h-80 overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]">
+                    <TimelineList
+                      timeline={room.snapshot?.timeline}
+                      identities={identities}
+                      auction={auction}
+                    />
+                  </div>
+                </section>
+              </div>
+
+              <div
+                id="mobile-auction-chat-panel"
+                role={usesCompactRoomTabs ? 'tabpanel' : undefined}
+                aria-labelledby={
+                  usesCompactRoomTabs
+                    ? 'mobile-auction-activity-tab-chat'
+                    : undefined
+                }
+                tabIndex={
+                  usesCompactRoomTabs && mobileTab === 'chat'
+                    ? 0
+                    : undefined
+                }
+                className={`min-w-0 outline-none focus:ring-2 focus:ring-inset focus:ring-emerald-700 lg:block ${
+                  mobileTab === 'chat' ? 'block' : 'hidden'
+                }`}
+              >
+                <AuctionChatPanel
+                  key={`${auctionId}:${user?.id ?? 'anonymous'}`}
+                  messages={room.chatMessages}
+                  isLoading={room.isChatHistoryLoading}
+                  historyError={room.chatHistoryError}
+                  sendError={room.chatSendError}
+                  isSending={room.isSendingChat}
+                  connectionState={room.connectionState}
                   role={role}
-                  activeBidderCount={room.snapshot?.activeBidderCount ?? 0}
-                  spectatorCount={room.snapshot?.spectatorCount ?? 0}
+                  isAuthenticated={Boolean(user?.id)}
+                  auctionStatus={auction.status}
+                  isSelected={
+                    !usesCompactRoomTabs || mobileTab === 'chat'
+                  }
+                  onSend={room.sendChatMessage}
+                  onRetry={room.requestChatHistory}
+                  onClearSendError={room.clearChatSendError}
+                />
+              </div>
+
+              <div
+                id="mobile-auction-insights-panel"
+                role={usesCompactRoomTabs ? 'tabpanel' : undefined}
+                aria-labelledby={
+                  usesCompactRoomTabs
+                    ? 'mobile-auction-activity-tab-insights'
+                    : undefined
+                }
+                tabIndex={
+                  usesCompactRoomTabs && mobileTab === 'insights'
+                    ? 0
+                    : undefined
+                }
+                className={`min-w-0 outline-none focus:ring-2 focus:ring-inset focus:ring-emerald-700 lg:block ${
+                  mobileTab === 'insights' ? 'block' : 'hidden'
+                }`}
+              >
+                <AuctionInsightsPanel
+                  stats={room.auctionStats}
+                  heat={room.auctionHeat}
+                  isLoading={room.isInsightsLoading}
+                  error={room.insightsError}
+                  onRetry={room.requestAuctionStats}
                   connectionLabel={connectionLabel}
                   connectionState={room.connectionState}
+                  role={role}
                   auctionStatus={auction.status}
                 />
-              ) : null}
+              </div>
             </div>
           </section>
         </div>
