@@ -199,7 +199,7 @@ describe('Socket.io auction rooms', () => {
     })
   })
 
-  it('persists and broadcasts a valid message from an authenticated joined bidder', async () => {
+  it('accepts ACTIVE auction chat from an authenticated joined bidder', async () => {
     const sender = await createUser('Chat Sender', {
       avatar: 'https://example.com/chat-sender.png',
     })
@@ -256,6 +256,149 @@ describe('Socket.io auction rooms', () => {
     expect(storedMessage.text).toBe('Is pickup available?')
     expect(historyAck).toEqual({ success: true, data: {} })
     expect(history.messages).toEqual([event.chatMessage])
+  })
+
+  it('keeps COMPLETED auction rooms readable while rejecting new chat privately', async () => {
+    const sender = await createUser('Completed Chat Sender', {
+      avatar: 'https://example.com/completed-chat-sender.png',
+    })
+    const auction = await createAuction()
+    const otherAuction = await createAuction({
+      title: 'Other Chat History Auction',
+    })
+    const startTime = new Date('2026-08-01T12:00:00.000Z')
+
+    await ChatMessage.insertMany([
+      ...Array.from({ length: 51 }, (_, index) => ({
+        auction: auction.id,
+        sender: sender.id,
+        text: `Stored message ${index + 1}`,
+        clientMessageId: `completed-history-${index + 1}`,
+        createdAt: new Date(startTime.getTime() + index * 1_000),
+      })),
+      {
+        auction: otherAuction.id,
+        sender: sender.id,
+        text: 'Other auction message',
+        clientMessageId: 'other-auction-history',
+        createdAt: startTime,
+      },
+    ])
+    await Auction.findByIdAndUpdate(auction.id, {
+      status: 'COMPLETED',
+    })
+
+    const [senderClient, spectatorClient] = await Promise.all([
+      connectClient(authenticatedOptions(sender)),
+      connectClient(),
+    ])
+    await Promise.all([
+      joinAuction(senderClient, auction.id, 'BIDDER'),
+      joinAuction(spectatorClient, auction.id, 'SPECTATOR'),
+    ])
+
+    const historyPromise = waitForEvent(
+      spectatorClient,
+      'chat_history',
+      (history) => history.auctionId === auction.id,
+    )
+    const historyAck = await emitWithAck(
+      spectatorClient,
+      'request_chat_history',
+      { auctionId: auction.id },
+    )
+    const history = await historyPromise
+    let roomChatCount = 0
+    let spectatorRejectionCount = 0
+    spectatorClient.on('chat_message', (event) => {
+      if (event.auctionId === auction.id) {
+        roomChatCount += 1
+      }
+    })
+    spectatorClient.on('chat_message_rejected', () => {
+      spectatorRejectionCount += 1
+    })
+    const rejectionPromise = waitForEvent(
+      senderClient,
+      'chat_message_rejected',
+      (rejection) =>
+        rejection.code === 'AUCTION_COMPLETED_READ_ONLY',
+    )
+
+    const acknowledgement = await emitWithAck(
+      senderClient,
+      'send_chat_message',
+      {
+        auctionId: auction.id,
+        text: 'This must not be saved',
+        clientMessageId: 'completed-chat-rejection',
+      },
+    )
+    const rejection = await rejectionPromise
+    const paymentUpdatePromise = waitForEvent(
+      spectatorClient,
+      'payment_status_updated',
+      (event) => event.auctionId === auction.id,
+    )
+    io.to(`auction:${auction.id}`).emit('payment_status_updated', {
+      auctionId: auction.id,
+      paymentStatus: 'SUCCESSFUL',
+      serverTime: Date.now(),
+    })
+    const paymentUpdate = await paymentUpdatePromise
+    const statsPromise = waitForEvent(
+      spectatorClient,
+      'auction_stats_updated',
+      (event) => event.auctionId === auction.id,
+    )
+    const statsAck = await emitWithAck(
+      spectatorClient,
+      'request_auction_stats',
+      { auctionId: auction.id },
+    )
+    const stats = await statsPromise
+    await new Promise((resolve) => setTimeout(resolve, 25))
+
+    const expectedRejection = {
+      success: false,
+      code: 'AUCTION_COMPLETED_READ_ONLY',
+      message: 'Auction ended. Chat is now read-only.',
+    }
+
+    expect(historyAck).toEqual({ success: true, data: {} })
+    expect(history.messages).toHaveLength(50)
+    expect(history.messages[0]).toMatchObject({
+      auctionId: auction.id,
+      text: 'Stored message 2',
+      sender: {
+        id: sender.id,
+        name: 'Completed Chat Sender',
+        avatarUrl: 'https://example.com/completed-chat-sender.png',
+      },
+    })
+    expect(history.messages.at(-1)).toMatchObject({
+      auctionId: auction.id,
+      text: 'Stored message 51',
+    })
+    expect(
+      history.messages.every((message) => message.auctionId === auction.id),
+    ).toBe(true)
+    expect(acknowledgement).toEqual(expectedRejection)
+    expect(rejection).toEqual(expectedRejection)
+    expect(
+      await ChatMessage.exists({
+        auction: auction.id,
+        clientMessageId: 'completed-chat-rejection',
+      }),
+    ).toBeNull()
+    expect(roomChatCount).toBe(0)
+    expect(spectatorRejectionCount).toBe(0)
+    expect(paymentUpdate).toMatchObject({
+      auctionId: auction.id,
+      paymentStatus: 'SUCCESSFUL',
+    })
+    expect(statsAck).toEqual({ success: true, data: {} })
+    expect(stats.stats.status).toBe('COMPLETED')
   })
 
   it('keeps anonymous spectators read-only while allowing them to receive chat', async () => {

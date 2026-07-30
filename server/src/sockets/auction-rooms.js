@@ -115,8 +115,12 @@ function rejectBid(socket, acknowledge, message) {
   }
 }
 
-function rejectChat(socket, acknowledge, message) {
-  const rejection = { success: false, message }
+function rejectChat(socket, acknowledge, message, code) {
+  const rejection = {
+    success: false,
+    ...(code ? { code } : {}),
+    message,
+  }
   socket.emit('chat_message_rejected', rejection)
 
   if (typeof acknowledge === 'function') {
@@ -599,7 +603,9 @@ function registerRoomHandlers(
         error instanceof ChatRejectedError
           ? error.message
           : 'Unable to send chat message'
-      rejectChat(socket, acknowledge, message)
+      const code =
+        error instanceof ChatRejectedError ? error.code : undefined
+      rejectChat(socket, acknowledge, message, code)
     }
   })
 
