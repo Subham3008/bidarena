@@ -72,4 +72,10 @@ export const env = Object.freeze({
   get cloudinaryApiSecret() {
     return process.env.CLOUDINARY_API_SECRET
   },
+  get razorpayKeyId() {
+    return process.env.RAZORPAY_KEY_ID
+  },
+  get razorpayKeySecret() {
+    return process.env.RAZORPAY_KEY_SECRET
+  },
 })

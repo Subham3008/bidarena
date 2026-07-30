@@ -4,10 +4,10 @@
 >
 > **Implemented now:** health/readiness, HTTP authentication, auction creation,
 > discovery, public auction details, seller auction management, protected image
-> uploads, profile editing, and seller-owned auctions.
+> uploads, profile editing, seller-owned auctions, and winner payments.
 >
-> Payment, bidding, and chat routes remain planned. Socket.io
-> auction rooms and snapshots are implemented.
+> Bidding and chat REST routes remain planned. Socket.io auction rooms and
+> snapshots are implemented.
 
 This document defines the initial HTTP boundary between the BidArena client and
 server. It is a contract, not evidence that a feature exists. A planned route
@@ -39,7 +39,8 @@ authorization, persistence, and tests are complete.
 | `GET /api/auctions/:auctionId` | Implemented | Public auction details with a safe seller summary. |
 | `PATCH/DELETE /api/auctions/:auctionId` | Implemented | Owner-only management of eligible upcoming auctions. |
 | `POST /api/uploads/auction-image` | Implemented | Protected JPEG, PNG, or WebP upload, maximum 5 MB. |
-| `/api/auctions/:auctionId/*` | Planned | History, recovery, and payment subresources. |
+| `/api/payments/*` | Implemented | Winner Razorpay order, verification, and authorised payment status. |
+| `/api/auctions/:auctionId/*` | Planned | History and recovery subresources. |
 | `GET/PATCH /api/auth/me` | Implemented | Current-user profile read and safe profile updates. |
 | `GET /api/auctions/mine` | Implemented | Authenticated seller listings, status filters, counts, and pagination. |
 
@@ -77,6 +78,8 @@ authorization, persistence, and tests are complete.
   Socket.io, and payment-provider calls.
 - Examples below follow that proposal and use `INR` only illustratively. They do
   not establish INR as the supported or default currency.
+- The implemented Razorpay boundary treats persisted integer `winningAmount`
+  as INR major units and safely converts it once to paise.
 - Once the decision is approved, the same representation must be used by every
   `amount`, `highestBid`, `minimumNextBid`, persistence field, and provider
   conversion. Clients format money for display but submit the unformatted
@@ -398,46 +401,62 @@ the authenticated session.
 
 ### 7.5 Winner payment
 
-All routes in this table are **planned and not implemented**. They require an
-authenticated principal, and the server must verify that principal against the
-persisted auction winner.
+These routes require an authenticated principal. Order creation and
+verification derive the winner and amount only from the completed auction.
 
 | Method | Path | Purpose | Success |
 |---|---|---|---|
-| `GET` | `/api/auctions/:auctionId/payment` | Read viewer-authorized payment status. | `200` |
-| `POST` | `/api/auctions/:auctionId/payment/order` | Create a Razorpay test order for the verified winner. | `201` |
-| `POST` | `/api/auctions/:auctionId/payment/verify` | Verify provider IDs and signature on the backend. | `200` |
+| `GET` | `/api/payments/auctions/:auctionId` | Winner checkout state or seller read-only status. | `200` |
+| `POST` | `/api/payments/auctions/:auctionId/order` | Create or reuse a Razorpay test order for the winner. | `201` |
+| `POST` | `/api/payments/verify` | Verify the stored order and Razorpay signature. | `200` |
 
 Representative order response:
 
 ```json
 {
   "success": true,
-  "message": "Payment order created",
+  "message": "Payment order ready",
   "data": {
     "order": {
-      "provider": "RAZORPAY",
+      "auctionId": "auction_opaque_id",
       "orderId": "provider_order_id",
       "amount": 120000,
-      "currency": "INR"
+      "currency": "INR",
+      "keyId": "rzp_test_public_key_id",
+      "auctionTitle": "Vintage Camera",
+      "winner": {
+        "id": "winner_opaque_id",
+        "name": "Auction Winner",
+        "avatarUrl": null
+      }
     }
   }
 }
 ```
 
+`amount` is INR in Razorpay's smallest unit (paise), converted safely from the
+persisted `winningAmount`. Request-body amount, winner, seller, or success
+claims never override database state.
+
 Representative verification request:
 
 ```json
 {
+  "auctionId": "auction_opaque_id",
   "razorpayOrderId": "provider_order_id",
   "razorpayPaymentId": "provider_payment_id",
   "razorpaySignature": "provider_signature"
 }
 ```
 
-The server verifies the signature before persisting `SUCCESSFUL`. A frontend
-checkout success callback alone never changes authoritative payment status.
-Provider secrets and signatures are never broadcast to the auction room.
+Verification checks the stored order and a timing-safe server HMAC before
+atomically persisting payment, `auction.paymentStatus`, and
+`PAYMENT_COMPLETED`.
+Repeated valid verification returns the existing result without duplicate
+records or timeline events. The derived checkout `status` is `NOT_ELIGIBLE`,
+`PENDING`, `PAID`, or `FAILED`, while `paymentStatus` retains the persisted
+`PENDING`, `SUCCESSFUL`, or `FAILED` enum. Sellers never receive checkout IDs,
+and secrets/signatures are never returned or broadcast.
 
 ## 8. List responses
 

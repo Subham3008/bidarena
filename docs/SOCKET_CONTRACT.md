@@ -3,8 +3,8 @@
 > **Contract status:** Living contract.
 > **Implemented now:** optional cookie authentication, auction rooms,
 > authoritative snapshots, in-memory presence, deterministic bidding, and
-> authoritative lifecycle timers, chat, live statistics, and auction heat.
-> Redis and payment events remain planned.
+> authoritative lifecycle timers, chat, live statistics, auction heat, and
+> verified payment status updates. Redis remains planned.
 
 The Domain A auction-room client consumes the implemented snapshot and presence
 events. Its bid control waits for a `place_bid` acknowledgement and never
@@ -316,7 +316,7 @@ to the requesting socket.
 ## 6. Server-to-client events
 
 Room, bidding, lifecycle, chat, statistics, and heat events named below are
-implemented. `timeline_event_created` and payment events remain planned.
+implemented. `timeline_event_created` remains planned.
 
 | Event | Audience | Purpose |
 |---|---|---|
@@ -623,13 +623,13 @@ requesting socket.
 {
   "auctionId": "auction_opaque_id",
   "paymentStatus": "SUCCESSFUL",
-  "updatedAt": "2026-08-01T12:35:00.000Z"
+  "serverTime": 1785596700000
 }
 ```
 
 This event is emitted only after backend verification and persistence. Provider
 order IDs, payment IDs, signatures, and secrets are not included in the room
-broadcast.
+broadcast. An idempotent verification retry does not emit it again.
 
 ### 6.13 `timer_sync`
 
