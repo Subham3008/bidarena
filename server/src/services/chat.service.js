@@ -4,10 +4,15 @@ import Auction from '../models/auction.model.js'
 import ChatMessage from '../models/chat-message.model.js'
 import { serializeParticipant } from './auction-payload.service.js'
 
-export class ChatRejectedError extends Error {}
+export class ChatRejectedError extends Error {
+  constructor(message, code) {
+    super(message)
+    this.code = code
+  }
+}
 
-function reject(message) {
-  throw new ChatRejectedError(message)
+function reject(message, code) {
+  throw new ChatRejectedError(message, code)
 }
 
 function escapeHtml(text) {
@@ -66,10 +71,19 @@ export async function createChatMessage({
   clientMessageId,
 }) {
   const input = normalizeChatMessageInput({ text, clientMessageId })
-  const auctionExists = await Auction.exists({ _id: auctionId })
+  const auction = await Auction.findById(auctionId)
+    .select('_id status')
+    .lean()
 
-  if (!auctionExists) {
+  if (!auction) {
     reject('Auction not found')
+  }
+
+  if (auction.status === 'COMPLETED') {
+    reject(
+      'Auction ended. Chat is now read-only.',
+      'AUCTION_COMPLETED_READ_ONLY',
+    )
   }
 
   // The unique index remains authoritative; this check gives retries a clear response.

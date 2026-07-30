@@ -127,7 +127,7 @@ The room, snapshot, bidding, chat, statistics, and heat commands are implemented
 | `leave_auction` | Same socket that joined | Leave an auction room. | `{}` |
 | `request_auction_snapshot` | Joined socket | Emit authoritative room state after a gap or suspected staleness. | `{}` |
 | `place_bid` | Joined verified bidder | Queue and atomically persist one bid intent. | `{ bid, latestBid, auction, timelineEvent }` |
-| `send_chat_message` | Joined verified seller or bidder | Persist one room-isolated chat message. | `{ chatMessage }` |
+| `send_chat_message` | Joined verified seller or bidder | Persist one room-isolated chat message unless the auction is completed. | `{ chatMessage }` |
 | `request_chat_history` | Joined socket | Emit the latest 50 persisted messages. | `{}` |
 | `request_auction_stats` | Joined socket | Emit current authoritative statistics and heat. | `{}` |
 
@@ -291,6 +291,9 @@ HTML-sensitive characters are escaped in public payloads. Each verified user
 may send at most five valid messages in ten seconds. The unique
 `sender + clientMessageId` constraint makes retry duplicates reject without a
 second persistence or broadcast. A chat error never enters the bid queue.
+The server reads the persisted auction status. Completed auction rooms remain
+connected and readable, but new messages reject privately with
+`AUCTION_COMPLETED_READ_ONLY`; no rejected message is persisted or broadcast.
 
 ### 5.6 `request_chat_history`
 
@@ -300,8 +303,9 @@ second persistence or broadcast. A chat error never enters the bid queue.
 }
 ```
 
-Any joined participant, including an anonymous spectator, may request history.
-Success emits `chat_history` only to that socket.
+Any joined participant, including an anonymous spectator, may request history,
+including after auction completion. Success emits `chat_history` only to that
+socket.
 
 ### 5.7 `request_auction_stats`
 
@@ -612,12 +616,13 @@ after MongoDB persistence succeeds.
 ```json
 {
   "success": false,
-  "message": "Chat rate limit exceeded; try again shortly"
+  "code": "AUCTION_COMPLETED_READ_ONLY",
+  "message": "Auction ended. Chat is now read-only."
 }
 ```
 
 This event and its matching negative acknowledgement are sent only to the
-requesting socket.
+requesting socket. Other chat validation rejections may omit `code`.
 
 ### 6.12 `payment_status_updated`
 
@@ -662,6 +667,7 @@ countdown and never changes auction status.
 | `AUCTION_NOT_ACTIVE` | Auction is upcoming or otherwise not active. | Use authoritative state; do not guess. |
 | `AUCTION_ENDED` | Server time is at or after `endAt`. | Request snapshot; do not retry bid. |
 | `AUCTION_COMPLETED` | Completion already persisted. | Request snapshot; do not retry bid. |
+| `AUCTION_COMPLETED_READ_ONLY` | Completed auction chat cannot accept new messages. | Keep history; do not retry the message. |
 | `SELLER_CANNOT_BID` | Verified seller attempted to bid. | Do not retry. |
 | `SPECTATOR_CANNOT_BID` | Socket is authorized only as spectator. | Change role only through an authorized join flow. |
 | `BID_BELOW_MINIMUM` | Amount is below authoritative minimum. | Render returned minimum and require a new intent. |
