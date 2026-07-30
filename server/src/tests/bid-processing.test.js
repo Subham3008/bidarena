@@ -416,4 +416,42 @@ describe('deterministic live bid processing', () => {
     })
     expect(await Bid.countDocuments({ auction: auction.id })).toBe(0)
   })
+
+  it('rejects exponential, unsafe, and over-limit bid amounts', async () => {
+    const seller = await createUser('Safe Amount Seller')
+    const bidder = await createUser('Safe Amount Bidder')
+    const auction = await createAuction(seller)
+    const client = await connectUser(bidder)
+    await joinBidder(client, auction.id)
+
+    const exponential = await emitWithAck(client, 'place_bid', {
+      auctionId: auction.id,
+      amount: '1e3',
+      clientBidId: 'exponential-bid',
+    })
+    const unsafe = await emitWithAck(client, 'place_bid', {
+      auctionId: auction.id,
+      amount: 1e28,
+      clientBidId: 'unsafe-bid',
+    })
+    const overLimit = await emitWithAck(client, 'place_bid', {
+      auctionId: auction.id,
+      amount: 1000000001,
+      clientBidId: 'over-limit-bid',
+    })
+
+    expect(exponential).toEqual({
+      success: false,
+      message: 'Exponential bid notation is not allowed',
+    })
+    expect(unsafe).toEqual({
+      success: false,
+      message: 'Bid amount must be a finite safe integer',
+    })
+    expect(overLimit).toEqual({
+      success: false,
+      message: 'Bid amount cannot exceed 1000000000',
+    })
+    expect(await Bid.countDocuments({ auction: auction.id })).toBe(0)
+  })
 })

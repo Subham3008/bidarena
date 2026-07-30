@@ -90,6 +90,22 @@ describe('Socket.io auction rooms', () => {
     return new Promise((resolve) => client.emit(event, payload, resolve))
   }
 
+  function authenticatedOptions(user) {
+    const token = createSessionToken(user.id)
+
+    return {
+      extraHeaders: {
+        Cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}`,
+      },
+    }
+  }
+
+  function nextPresence(client) {
+    return new Promise((resolve) => {
+      client.once('presence_updated', resolve)
+    })
+  }
+
   it('sends an authoritative snapshot to a spectator', async () => {
     const auction = await createAuction({ currentBid: 3100 })
     const bidder = new mongoose.Types.ObjectId()
@@ -206,6 +222,102 @@ describe('Socket.io auction rooms', () => {
     expect(snapshotA.currentUserRole).toBe('SELLER')
     expect(snapshotB.currentUserRole).toBe('SPECTATOR')
     expect(clientBReceivedAuctionAEvent).toBe(false)
+  })
+
+  it('counts one bidder across multiple sockets and removes one socket at a time', async () => {
+    const bidder = await User.create({
+      displayName: 'Multi-tab Bidder',
+      email: 'multi-tab-bidder@example.com',
+      passwordHash: 'stored-password-hash',
+    })
+    const auction = await createAuction()
+    const [observer, firstTab, secondTab] = await Promise.all([
+      connectClient(),
+      connectClient(authenticatedOptions(bidder)),
+      connectClient(authenticatedOptions(bidder)),
+    ])
+    await emitWithAck(observer, 'join_auction', {
+      auctionId: auction.id,
+      mode: 'SPECTATOR',
+    })
+
+    let updatePromise = nextPresence(observer)
+    await emitWithAck(firstTab, 'join_auction', {
+      auctionId: auction.id,
+      mode: 'BIDDER',
+    })
+    expect(await updatePromise).toMatchObject({
+      activeBidderCount: 1,
+      spectatorCount: 1,
+    })
+
+    updatePromise = nextPresence(observer)
+    await emitWithAck(secondTab, 'join_auction', {
+      auctionId: auction.id,
+      mode: 'BIDDER',
+    })
+    expect(await updatePromise).toMatchObject({
+      activeBidderCount: 1,
+      spectatorCount: 1,
+    })
+
+    updatePromise = nextPresence(observer)
+    firstTab.disconnect()
+    expect(await updatePromise).toMatchObject({
+      activeBidderCount: 1,
+      spectatorCount: 1,
+    })
+
+    updatePromise = nextPresence(observer)
+    await emitWithAck(secondTab, 'leave_auction', {
+      auctionId: auction.id,
+    })
+    expect(await updatePromise).toMatchObject({
+      activeBidderCount: 0,
+      spectatorCount: 1,
+    })
+  })
+
+  it('counts authenticated spectators by identity and anonymous spectators by connection', async () => {
+    const spectator = await User.create({
+      displayName: 'Multi-tab Spectator',
+      email: 'multi-tab-spectator@example.com',
+      passwordHash: 'stored-password-hash',
+    })
+    const auction = await createAuction()
+    const [anonymous, firstTab, secondTab] = await Promise.all([
+      connectClient(),
+      connectClient(authenticatedOptions(spectator)),
+      connectClient(authenticatedOptions(spectator)),
+    ])
+    await emitWithAck(anonymous, 'join_auction', {
+      auctionId: auction.id,
+      mode: 'SPECTATOR',
+    })
+
+    let updatePromise = nextPresence(anonymous)
+    await emitWithAck(firstTab, 'join_auction', {
+      auctionId: auction.id,
+      mode: 'SPECTATOR',
+    })
+    expect((await updatePromise).spectatorCount).toBe(2)
+
+    updatePromise = nextPresence(anonymous)
+    await emitWithAck(secondTab, 'join_auction', {
+      auctionId: auction.id,
+      mode: 'SPECTATOR',
+    })
+    expect((await updatePromise).spectatorCount).toBe(2)
+
+    updatePromise = nextPresence(anonymous)
+    firstTab.disconnect()
+    expect((await updatePromise).spectatorCount).toBe(2)
+
+    updatePromise = nextPresence(anonymous)
+    await emitWithAck(secondTab, 'leave_auction', {
+      auctionId: auction.id,
+    })
+    expect((await updatePromise).spectatorCount).toBe(1)
   })
 
   it('restores enriched persisted winner and bid state after reconnect', async () => {
