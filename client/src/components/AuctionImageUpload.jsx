@@ -47,6 +47,7 @@ export function AuctionImageUpload({
   const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadError, setUploadError] = useState('')
   const [isDragging, setIsDragging] = useState(false)
+  const [failedPreviewUrl, setFailedPreviewUrl] = useState('')
 
   useEffect(
     () => () => {
@@ -83,6 +84,7 @@ export function AuctionImageUpload({
     const nextPreviewUrl = URL.createObjectURL(file)
     objectUrlRef.current = nextPreviewUrl
     setPreviewUrl(nextPreviewUrl)
+    setFailedPreviewUrl('')
     setFileDetails({ name: file.name, size: formatFileSize(file.size) })
     setUploadError('')
     setUploadProgress(0)
@@ -117,6 +119,7 @@ export function AuctionImageUpload({
 
       releaseObjectUrl()
       setPreviewUrl('')
+      setFailedPreviewUrl('')
       setFileDetails(null)
       setUploadError(
         getApiErrorMessage(
@@ -150,6 +153,7 @@ export function AuctionImageUpload({
     uploadControllerRef.current = null
     releaseObjectUrl()
     setPreviewUrl('')
+    setFailedPreviewUrl('')
     setFileDetails(null)
     setUploadState('idle')
     setUploadProgress(0)
@@ -159,6 +163,7 @@ export function AuctionImageUpload({
   }
 
   const displayedImage = previewUrl || value
+  const imageFailed = displayedImage === failedPreviewUrl
   const isUploading = uploadState === 'uploading'
 
   return (
@@ -177,14 +182,21 @@ export function AuctionImageUpload({
       />
 
       {displayedImage ? (
-        <div className="overflow-hidden border border-stone-200 bg-white">
+        <div className="surface-muted overflow-hidden bg-white">
           <div className="grid gap-4 p-4 sm:grid-cols-[11rem_minmax(0,1fr)] sm:items-center">
-            <div className="aspect-[4/3] overflow-hidden bg-stone-100">
-              <img
-                src={displayedImage}
-                alt="Auction item preview"
-                className="h-full w-full object-cover"
-              />
+            <div className="aspect-[4/3] overflow-hidden rounded-md bg-stone-100">
+              {!imageFailed ? (
+                <img
+                  src={displayedImage}
+                  alt="Auction item preview"
+                  className="h-full w-full object-cover"
+                  onError={() => setFailedPreviewUrl(displayedImage)}
+                />
+              ) : (
+                <div className="grid h-full place-items-center px-3 text-center text-sm text-stone-500">
+                  Preview unavailable
+                </div>
+              )}
             </div>
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold text-stone-900">
@@ -195,17 +207,27 @@ export function AuctionImageUpload({
               ) : null}
 
               {isUploading ? (
-                <div className="mt-3" aria-live="polite">
+                <div className="mt-3">
                   <div className="flex items-center justify-between gap-3 text-sm text-stone-600">
-                    <span className="inline-flex items-center gap-2">
+                    <span
+                      className="inline-flex items-center gap-2"
+                      role="status"
+                    >
                       <LoaderCircle size={16} className="animate-spin" aria-hidden="true" />
                       Uploading image
                     </span>
                     <span className="tabular-nums">{uploadProgress}%</span>
                   </div>
-                  <div className="mt-2 h-1.5 overflow-hidden bg-stone-200">
+                  <div
+                    className="mt-2 h-1.5 overflow-hidden rounded-full bg-stone-200"
+                    role="progressbar"
+                    aria-label="Image upload progress"
+                    aria-valuemin="0"
+                    aria-valuemax="100"
+                    aria-valuenow={uploadProgress}
+                  >
                     <div
-                      className="h-full bg-emerald-700 transition-[width]"
+                      className="h-full rounded-full bg-emerald-700 transition-[width]"
                       style={{ width: `${uploadProgress}%` }}
                     />
                   </div>
@@ -221,7 +243,7 @@ export function AuctionImageUpload({
                   type="button"
                   onClick={() => inputRef.current?.click()}
                   disabled={disabled || isUploading}
-                  className="inline-flex items-center gap-2 rounded-sm border border-stone-300 px-3 py-2 text-sm font-medium hover:border-emerald-700 hover:text-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:ring-offset-2 disabled:cursor-not-allowed disabled:text-stone-400"
+                  className="btn-secondary"
                 >
                   <Upload size={16} aria-hidden="true" /> Replace image
                 </button>
@@ -229,7 +251,7 @@ export function AuctionImageUpload({
                   type="button"
                   onClick={removeImage}
                   disabled={disabled}
-                  className="inline-flex items-center gap-2 rounded-sm px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-700 focus:ring-offset-2 disabled:cursor-not-allowed disabled:text-stone-400"
+                  className="inline-flex min-h-11 items-center gap-2 rounded-md px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-700 focus:ring-offset-2 disabled:cursor-not-allowed disabled:text-stone-400"
                 >
                   <Trash2 size={16} aria-hidden="true" /> Remove
                 </button>
@@ -239,7 +261,7 @@ export function AuctionImageUpload({
         </div>
       ) : (
         <div
-          className={`grid min-h-48 place-items-center border border-dashed px-5 py-8 text-center transition ${
+          className={`grid min-h-52 place-items-center rounded-lg border border-dashed px-5 py-8 text-center transition ${
             isDragging
               ? 'border-emerald-700 bg-emerald-50'
               : 'border-stone-300 bg-stone-50'
@@ -257,12 +279,14 @@ export function AuctionImageUpload({
             <p className="mt-3 text-sm font-semibold text-stone-800">
               Drag and drop an item image here
             </p>
-            <p className="mt-1 text-xs text-stone-500">JPG, PNG or WebP · maximum 5 MB</p>
+            <p className="mt-1 text-sm text-stone-500">
+              JPG, PNG or WebP · maximum 5 MB
+            </p>
             <button
               type="button"
               onClick={() => inputRef.current?.click()}
               disabled={disabled}
-              className="mt-4 rounded-sm border border-stone-300 bg-white px-4 py-2 text-sm font-medium hover:border-emerald-700 hover:text-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:ring-offset-2 disabled:cursor-not-allowed disabled:text-stone-400"
+              className="btn-secondary mt-4"
             >
               Choose image
             </button>
@@ -273,7 +297,7 @@ export function AuctionImageUpload({
       {uploadError || error ? (
         <p
           id="auction-image-error"
-          className="mt-2 text-sm text-red-700"
+          className="feedback-error mt-3 px-3 py-2 text-sm"
           role="alert"
         >
           {uploadError || error}

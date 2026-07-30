@@ -2,8 +2,13 @@ import { useQuery } from '@tanstack/react-query'
 import {
   ArrowLeft,
   CalendarDays,
+  CheckCircle2,
   CircleDot,
+  Clock3,
+  CreditCard,
+  Gavel,
   Radio,
+  Trophy,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
@@ -134,7 +139,7 @@ function useCompactRoomTabs() {
   const [isCompact, setIsCompact] = useState(() =>
     typeof window === 'undefined' || !window.matchMedia
       ? true
-      : window.matchMedia('(max-width: 1023px)').matches,
+      : window.matchMedia('(max-width: 1279px)').matches,
   )
 
   useEffect(() => {
@@ -142,7 +147,7 @@ function useCompactRoomTabs() {
       return undefined
     }
 
-    const mediaQuery = window.matchMedia('(max-width: 1023px)')
+    const mediaQuery = window.matchMedia('(max-width: 1279px)')
     const handleChange = () => setIsCompact(mediaQuery.matches)
 
     handleChange()
@@ -155,16 +160,20 @@ function useCompactRoomTabs() {
 
 function DetailsSkeleton() {
   return (
-    <main className="mx-auto max-w-7xl animate-pulse px-4 py-8 sm:px-6 lg:px-8">
-      <div className="h-5 w-36 bg-stone-200" />
-      <div className="mt-8 grid gap-6 lg:grid-cols-12">
-        <div className="space-y-4 lg:col-span-5 xl:col-span-3">
-          <div className="aspect-[4/3] bg-stone-200" />
-          <div className="h-8 w-3/4 bg-stone-200" />
-          <div className="h-20 bg-stone-200" />
+    <main
+      className="app-container animate-pulse py-8"
+      aria-label="Loading auction room"
+      aria-busy="true"
+    >
+      <div className="h-5 w-36 rounded bg-stone-200" />
+      <div className="mt-8 grid gap-6 lg:grid-cols-12 xl:grid-cols-[300px_minmax(0,1fr)_360px]">
+        <div className="space-y-4 lg:col-span-5 xl:col-span-1">
+          <div className="aspect-[4/3] rounded-[var(--radius-lg)] bg-stone-200" />
+          <div className="h-8 w-3/4 rounded bg-stone-200" />
+          <div className="h-20 rounded bg-stone-200" />
         </div>
-        <div className="h-[30rem] bg-white ring-1 ring-stone-200 lg:col-span-7 xl:col-span-5" />
-        <div className="h-72 bg-white ring-1 ring-stone-200 lg:col-span-12 xl:col-span-4" />
+        <div className="surface-card h-[30rem] lg:col-span-7 xl:col-span-1" />
+        <div className="surface-card h-72 lg:col-span-12 xl:col-span-1" />
       </div>
     </main>
   )
@@ -274,7 +283,7 @@ function BidList({ bids, identities }) {
   }
 
   return (
-    <ol className="divide-y divide-stone-100">
+    <ol className="space-y-1.5">
       {bids.map((bid, index) => {
         const bidder = resolveIdentity(bid.bidder, identities)
         const sequence = bid.serverSequence ?? bid.sequence
@@ -283,31 +292,36 @@ function BidList({ bids, identities }) {
         return (
           <li
             key={bid.id ?? sequence}
-            className={`flex items-center justify-between gap-3 py-3 ${
-              index === 0 ? 'bg-emerald-50/60' : ''
+            className={`flex min-w-0 items-center justify-between gap-3 rounded-[var(--radius-md)] px-3 py-3 ${
+              index === 0
+                ? 'bg-[var(--color-green-soft)] ring-1 ring-inset ring-emerald-200'
+                : 'hover:bg-stone-50'
             }`}
           >
-            <div className="flex min-w-0 items-center gap-3 px-2">
+            <div className="flex min-w-0 items-center gap-3">
               <UserAvatar identity={bidder} />
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <p className="truncate text-sm font-semibold text-stone-900">
+                  <p
+                    className="truncate text-sm font-semibold text-stone-900"
+                    title={bidder.name}
+                  >
                     {bidder.name}
                   </p>
                   {index === 0 ? (
-                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-emerald-800">
+                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">
                       Latest
                     </span>
                   ) : null}
                 </div>
-                <p className="mt-0.5 text-xs text-stone-500">
+                <p className="mt-0.5 break-words text-xs text-stone-500">
                   ID: {shortId(bidder.id)} · {formatDate(bid.timestamp)}
                   {sequence ? ` · #${sequence}` : ''}
                 </p>
               </div>
             </div>
             <p
-              className="max-w-[45%] shrink-0 break-words pr-2 text-right font-semibold tabular-nums"
+              className="max-w-[45%] shrink-0 break-words text-right font-semibold tabular-nums [overflow-wrap:anywhere]"
               title={bidPresentation.exact}
             >
               {bidPresentation.display}
@@ -361,30 +375,78 @@ function timelineMessage(event, identities, auction) {
     .replace(/^./, (character) => character.toUpperCase())
 }
 
+function timelinePresentation(event) {
+  const eventType = event.eventType ?? event.type ?? ''
+
+  if (eventType === 'BID_ACCEPTED') {
+    return {
+      Icon: Gavel,
+      className: 'bg-sky-50 text-sky-800 ring-sky-200',
+    }
+  }
+
+  if (eventType === 'WINNER_DECLARED') {
+    return {
+      Icon: Trophy,
+      className: 'bg-amber-50 text-amber-800 ring-amber-200',
+    }
+  }
+
+  if (eventType.startsWith('PAYMENT_')) {
+    return {
+      Icon: CreditCard,
+      className: 'bg-emerald-50 text-emerald-800 ring-emerald-200',
+    }
+  }
+
+  if (
+    eventType === 'AUCTION_STARTED' ||
+    eventType === 'AUCTION_COMPLETED'
+  ) {
+    return {
+      Icon: Clock3,
+      className: 'bg-stone-100 text-stone-700 ring-stone-200',
+    }
+  }
+
+  return {
+    Icon: CircleDot,
+    className: 'bg-stone-100 text-stone-700 ring-stone-200',
+  }
+}
+
 function TimelineList({ timeline, identities, auction }) {
   if (!timeline?.length) {
     return <EmptyState>No timeline activity is available yet.</EmptyState>
   }
 
   return (
-    <ol className="divide-y divide-stone-100">
-      {timeline.map((event) => (
-        <li key={event.id ?? event.sequence} className="flex gap-3 py-3">
-          <CircleDot
-            size={16}
-            className="mt-0.5 shrink-0 text-emerald-700"
-            aria-hidden="true"
-          />
-          <div>
-            <p className="text-sm font-medium leading-5 text-stone-800">
-              {timelineMessage(event, identities, auction)}
-            </p>
-            <p className="mt-1 text-xs text-stone-500">
-              {formatDate(event.timestamp ?? event.occurredAt)}
-            </p>
-          </div>
-        </li>
-      ))}
+    <ol className="space-y-1">
+      {timeline.map((event) => {
+        const { Icon, className } = timelinePresentation(event)
+
+        return (
+          <li
+            key={event.id ?? event.sequence}
+            className="relative flex min-w-0 gap-3 rounded-[var(--radius-md)] px-2 py-3 hover:bg-stone-50"
+          >
+            <span
+              className={`mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full ring-1 ring-inset ${className}`}
+              aria-hidden="true"
+            >
+              <Icon size={15} />
+            </span>
+            <div className="min-w-0">
+              <p className="break-words text-sm font-semibold leading-5 text-stone-800 [overflow-wrap:anywhere]">
+                {timelineMessage(event, identities, auction)}
+              </p>
+              <p className="mt-1 text-xs text-stone-500">
+                {formatDate(event.timestamp ?? event.occurredAt)}
+              </p>
+            </div>
+          </li>
+        )
+      })}
     </ol>
   )
 }
@@ -528,7 +590,7 @@ export function AuctionDetailsPage() {
 
   if (auctionQuery.isPending) {
     return (
-      <div className="min-h-screen bg-stone-100 text-stone-950">
+      <div className="app-shell">
         <MarketplaceHeader />
         <DetailsSkeleton />
       </div>
@@ -541,7 +603,7 @@ export function AuctionDetailsPage() {
     const notFound = status === 404
 
     return (
-      <div className="min-h-screen bg-stone-100 text-stone-950">
+      <div className="app-shell">
         <MarketplaceHeader />
         <main className="mx-auto max-w-2xl px-4 py-24 text-center sm:px-6">
           <p className="text-sm font-semibold text-emerald-800">
@@ -595,9 +657,9 @@ export function AuctionDetailsPage() {
                   : ''
 
   return (
-    <div className="min-h-screen overflow-x-hidden bg-stone-100 text-stone-950">
+    <div className="app-shell">
       <MarketplaceHeader />
-      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      <main className="app-container py-8">
         <Link
           to="/auctions"
           className="inline-flex items-center gap-2 text-sm font-medium text-stone-600 hover:text-stone-950"
@@ -606,17 +668,20 @@ export function AuctionDetailsPage() {
         </Link>
 
         {room.roomError ? (
-          <div className="mt-5 border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <div
+            className="mt-5 rounded-[var(--radius-sm)] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+            role="status"
+          >
             {room.roomError}
           </div>
         ) : null}
 
-        <div className="mt-7 grid gap-6 lg:grid-cols-12 lg:items-start">
+        <div className="mt-7 grid min-w-0 gap-6 lg:grid-cols-12 lg:items-start xl:grid-cols-[300px_minmax(0,1fr)_360px]">
           <section
-            className="lg:col-span-5 xl:col-span-3"
+            className="min-w-0 lg:col-span-5 xl:col-span-1"
             aria-labelledby="auction-title"
           >
-            <div className="aspect-[4/3] overflow-hidden border border-stone-200 bg-stone-200">
+            <div className="surface-card aspect-[4/3] overflow-hidden bg-stone-200">
               {!imageFailed ? (
                 <img
                   src={auction.image}
@@ -676,10 +741,10 @@ export function AuctionDetailsPage() {
           </section>
 
           <section
-            className="space-y-6 lg:col-span-7 xl:col-span-5"
+            className="min-w-0 space-y-6 lg:col-span-7 xl:col-span-1"
             aria-label="Live auction"
           >
-            <div className="border border-stone-200 bg-white p-5 sm:p-6">
+            <div className="surface-card p-5 sm:p-6">
               <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
                   <span
@@ -725,7 +790,7 @@ export function AuctionDetailsPage() {
                         identity={currentBidder}
                         className="h-7 w-7 text-[0.6rem]"
                       />
-                      <p className="min-w-0 text-sm text-stone-600">
+                      <p className="min-w-0 break-words text-sm text-stone-600 [overflow-wrap:anywhere]">
                         <span className="font-medium text-stone-900">
                           {currentBidder.name}
                         </span>{' '}
@@ -737,24 +802,29 @@ export function AuctionDetailsPage() {
                 <div className="min-w-0 sm:text-right">
                   <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">
                     {auction.status === 'COMPLETED'
-                      ? 'Auction ended'
+                      ? 'Final status'
                       : 'Remaining time'}
                   </p>
-                  <p className="mt-2 text-4xl font-semibold tracking-tight tabular-nums">
+                  <p className="mt-2 text-[clamp(1.9rem,5vw,2.5rem)] font-semibold tracking-tight tabular-nums">
                     {auction.status === 'COMPLETED'
-                      ? formatDuration(0)
+                      ? 'Bidding closed'
                       : remainingTime === null
-                      ? '--:--:--'
-                      : formatDuration(remainingTime)}
+                        ? '--:--:--'
+                        : formatDuration(remainingTime)}
                   </p>
                   <p className="mt-2 text-sm text-stone-500">
-                    Synced to server time
+                    {auction.status === 'COMPLETED'
+                      ? `Ended ${formatDate(auction.endAt)}`
+                      : 'Synced to server time'}
                   </p>
                 </div>
               </div>
 
               {auction.status === 'COMPLETED' ? (
-                <section className="mt-7 border border-emerald-200 bg-emerald-50 p-4">
+                <section
+                  className="mt-7 rounded-[var(--radius-md)] border border-emerald-200 bg-[var(--color-green-soft)] p-4"
+                  aria-live="polite"
+                >
                   {winner.id ? (
                     <div className="flex items-center gap-3">
                       <UserAvatar
@@ -765,7 +835,10 @@ export function AuctionDetailsPage() {
                         <p className="text-xs font-semibold uppercase tracking-wide text-emerald-800">
                           Winner
                         </p>
-                        <p className="mt-1 truncate font-semibold text-stone-950">
+                        <p
+                          className="mt-1 truncate font-semibold text-stone-950"
+                          title={winner.name}
+                        >
                           {winner.name}
                         </p>
                         <p className="mt-0.5 text-xs text-stone-600">
@@ -817,87 +890,107 @@ export function AuctionDetailsPage() {
                 }
               />
 
-              <form
-                onSubmit={handleBidSubmit}
-                className="mt-8 border-t border-stone-200 pt-6"
-                noValidate
-              >
-                <label className="block text-sm font-medium" htmlFor="bid-amount">
-                  Your bid
-                </label>
-                <div className="mt-2 flex flex-col gap-3 sm:flex-row">
-                  <input
-                    id="bid-amount"
-                    type="text"
-                    inputMode="decimal"
-                    autoComplete="off"
-                    maxLength={19}
-                    pattern="[0-9]+([.][0-9]{1,2})?"
-                    value={bidAmount}
-                    aria-invalid={Boolean(inputError || room.bidError)}
-                    aria-describedby={
-                      inputError || room.bidError || readOnlyReason
-                        ? 'bid-feedback'
-                        : undefined
-                    }
-                    disabled={!canBid || room.isSubmittingBid}
-                    placeholder={String(minimumNextBid)}
-                    onChange={handleBidChange}
-                    onKeyDown={handleBidKeyDown}
-                    className="min-w-0 flex-1 rounded-sm border border-stone-300 px-3 py-2.5 outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/20 disabled:bg-stone-100"
+              {auction.status === 'COMPLETED' ? (
+                <div className="mt-6 flex items-start gap-3 border-t border-stone-200 pt-5 text-sm text-stone-600">
+                  <CheckCircle2
+                    size={18}
+                    className="mt-0.5 shrink-0 text-emerald-700"
+                    aria-hidden="true"
                   />
-                  <button
-                    type="submit"
-                    disabled={!canBid || room.isSubmittingBid}
-                    className="rounded-sm bg-emerald-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-emerald-900 focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-stone-400"
-                  >
-                    {room.isSubmittingBid ? 'Awaiting confirmation…' : 'Place bid'}
-                  </button>
+                  <p>
+                    Bidding is closed. The final result and payment status above
+                    are authoritative.
+                  </p>
                 </div>
-                {inputError || room.bidError ? (
-                  <p
-                    id="bid-feedback"
-                    className="mt-3 text-sm text-red-700"
-                    role="alert"
-                  >
-                    {inputError || room.bidError}
-                  </p>
-                ) : readOnlyReason ? (
-                  <p
-                    id="bid-feedback"
-                    className="mt-3 text-sm text-stone-500"
-                  >
-                    {readOnlyReason}
-                  </p>
-                ) : null}
-              </form>
+              ) : (
+                <form
+                  onSubmit={handleBidSubmit}
+                  className="mt-8 border-t border-stone-200 pt-6"
+                  noValidate
+                >
+                  <label className="field-label" htmlFor="bid-amount">
+                    Your bid
+                  </label>
+                  <div className="mt-2 flex flex-col gap-3 sm:flex-row">
+                    <input
+                      id="bid-amount"
+                      type="text"
+                      inputMode="decimal"
+                      autoComplete="off"
+                      maxLength={19}
+                      pattern="[0-9]+([.][0-9]{1,2})?"
+                      value={bidAmount}
+                      aria-invalid={Boolean(inputError || room.bidError)}
+                      aria-describedby={
+                        inputError || room.bidError || readOnlyReason
+                          ? 'bid-feedback'
+                          : undefined
+                      }
+                      disabled={!canBid || room.isSubmittingBid}
+                      placeholder={String(minimumNextBid)}
+                      onChange={handleBidChange}
+                      onKeyDown={handleBidKeyDown}
+                      className="field-control min-w-0 flex-1"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!canBid || room.isSubmittingBid}
+                      className="btn-primary px-5"
+                    >
+                      {room.isSubmittingBid
+                        ? 'Awaiting confirmation…'
+                        : 'Place bid'}
+                    </button>
+                  </div>
+                  {inputError || room.bidError ? (
+                    <p
+                      id="bid-feedback"
+                      className="mt-3 text-sm text-red-700"
+                      role="alert"
+                    >
+                      {inputError || room.bidError}
+                    </p>
+                  ) : readOnlyReason ? (
+                    <p
+                      id="bid-feedback"
+                      className="mt-3 text-sm text-stone-500"
+                    >
+                      {readOnlyReason}
+                    </p>
+                  ) : null}
+                </form>
+              )}
             </div>
 
             <div className="hidden space-y-6 xl:block">
-              <section className="border border-stone-200 bg-white p-5">
+              <section className="surface-card p-5">
                 <h2 className="font-semibold">Recent bids</h2>
-                <BidList
-                  bids={room.snapshot?.latestBids}
-                  identities={identities}
-                />
+                <div className="soft-scrollbar mt-3 max-h-96 overflow-y-auto overscroll-contain pr-1">
+                  <BidList
+                    bids={room.snapshot?.latestBids}
+                    identities={identities}
+                  />
+                </div>
               </section>
-              <section className="border border-stone-200 bg-white p-5">
+              <section className="surface-card p-5">
                 <h2 className="font-semibold">Timeline</h2>
-                <TimelineList
-                  timeline={room.snapshot?.timeline}
-                  identities={identities}
-                  auction={auction}
-                />
+                <div className="soft-scrollbar mt-3 max-h-[30rem] overflow-y-auto overscroll-contain pr-1">
+                  <TimelineList
+                    timeline={room.snapshot?.timeline}
+                    identities={identities}
+                    auction={auction}
+                  />
+                </div>
               </section>
             </div>
           </section>
 
           <section
-            className="min-w-0 lg:col-span-12 xl:col-span-4"
+            className="min-w-0 lg:col-span-12 xl:col-span-1"
             aria-label="Auction room workspace"
           >
             <div
-              className="flex border-b border-stone-300 lg:hidden"
+              className="surface-card flex overflow-hidden border-b border-stone-300 xl:hidden"
               role="tablist"
               aria-orientation="horizontal"
               aria-label="Auction room sections"
@@ -925,9 +1018,7 @@ export function AuctionDetailsPage() {
               ))}
             </div>
 
-            <div
-              className="min-w-0 lg:grid lg:grid-cols-3 lg:items-start lg:gap-6 xl:grid-cols-1"
-            >
+            <div className="min-w-0 xl:grid xl:grid-cols-1 xl:items-start xl:gap-6">
               <div
                 id="mobile-auction-activity-panel"
                 role={usesCompactRoomTabs ? 'tabpanel' : undefined}
@@ -941,22 +1032,22 @@ export function AuctionDetailsPage() {
                     ? 0
                     : undefined
                 }
-                className={`min-w-0 space-y-6 border border-t-0 border-stone-200 bg-white p-5 outline-none focus:ring-2 focus:ring-inset focus:ring-emerald-700 lg:block lg:border-0 lg:bg-transparent lg:p-0 xl:hidden ${
+                className={`min-w-0 space-y-5 py-5 outline-none focus:ring-2 focus:ring-inset focus:ring-emerald-700 xl:hidden ${
                   mobileTab === 'activity' ? 'block' : 'hidden'
                 }`}
               >
-                <section className="min-w-0 border border-stone-200 bg-white p-4">
+                <section className="surface-card min-w-0 p-4">
                   <h2 className="font-semibold">Recent bids</h2>
-                  <div className="mt-2 max-h-80 overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]">
+                  <div className="soft-scrollbar mt-2 max-h-80 overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]">
                     <BidList
                       bids={room.snapshot?.latestBids}
                       identities={identities}
                     />
                   </div>
                 </section>
-                <section className="min-w-0 border border-stone-200 bg-white p-4">
+                <section className="surface-card min-w-0 p-4">
                   <h2 className="font-semibold">Timeline</h2>
-                  <div className="mt-2 max-h-80 overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]">
+                  <div className="soft-scrollbar mt-2 max-h-80 overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]">
                     <TimelineList
                       timeline={room.snapshot?.timeline}
                       identities={identities}
@@ -979,7 +1070,7 @@ export function AuctionDetailsPage() {
                     ? 0
                     : undefined
                 }
-                className={`min-w-0 outline-none focus:ring-2 focus:ring-inset focus:ring-emerald-700 lg:block ${
+                className={`min-w-0 py-5 outline-none focus:ring-2 focus:ring-inset focus:ring-emerald-700 xl:block xl:py-0 ${
                   mobileTab === 'chat' ? 'block' : 'hidden'
                 }`}
               >
@@ -994,6 +1085,8 @@ export function AuctionDetailsPage() {
                   role={role}
                   isAuthenticated={Boolean(user?.id)}
                   auctionStatus={auction.status}
+                  currentUserId={user?.id}
+                  sellerId={identityId(auction.seller)}
                   isSelected={
                     !usesCompactRoomTabs || mobileTab === 'chat'
                   }
@@ -1016,7 +1109,7 @@ export function AuctionDetailsPage() {
                     ? 0
                     : undefined
                 }
-                className={`min-w-0 outline-none focus:ring-2 focus:ring-inset focus:ring-emerald-700 lg:block ${
+                className={`min-w-0 py-5 outline-none focus:ring-2 focus:ring-inset focus:ring-emerald-700 xl:block xl:py-0 ${
                   mobileTab === 'insights' ? 'block' : 'hidden'
                 }`}
               >

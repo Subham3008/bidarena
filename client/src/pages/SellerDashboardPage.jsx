@@ -1,6 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CalendarClock, Eye, Pencil, Plus, Trash2 } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  CalendarClock,
+  CheckCircle2,
+  Eye,
+  LayoutGrid,
+  Pencil,
+  Plus,
+  Radio,
+  Trash2,
+} from 'lucide-react'
+import { createElement, useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 
@@ -31,6 +40,18 @@ const STATUS_LABELS = {
   COMPLETED: 'Completed',
 }
 
+const PAYMENT_LABELS = {
+  SUCCESSFUL: 'Paid',
+  PENDING: 'Pending',
+  FAILED: 'Failed',
+}
+
+const PAYMENT_STYLES = {
+  SUCCESSFUL: 'bg-emerald-50 text-emerald-800',
+  PENDING: 'bg-amber-50 text-amber-800',
+  FAILED: 'bg-red-50 text-red-700',
+}
+
 function formatDate(value) {
   const date = new Date(value)
   return Number.isNaN(date.getTime())
@@ -40,10 +61,17 @@ function formatDate(value) {
 
 function DashboardSkeleton() {
   return (
-    <div className="mt-6 grid animate-pulse gap-5 md:grid-cols-2 xl:grid-cols-3" aria-label="Loading your auctions">
-      {Array.from({ length: 3 }, (_, index) => (
-        <div key={index} className="h-96 border border-stone-200 bg-white" />
-      ))}
+    <div className="mt-7" role="status" aria-label="Loading your auctions">
+      <span className="sr-only">Loading your seller auctions…</span>
+      <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+        {Array.from({ length: 3 }, (_, index) => (
+          <div
+            key={index}
+            className="surface-card h-[26rem] animate-pulse bg-white motion-reduce:animate-none"
+            aria-hidden="true"
+          />
+        ))}
+      </div>
     </div>
   )
 }
@@ -54,89 +82,113 @@ function SellerAuctionCard({ auction, onDelete }) {
   const displayedBid = auction.currentBid ?? auction.startBid
   const price = getCurrencyPresentation(displayedBid)
   const canManage = useAuctionManagementEligibility(auction)
+  const paymentStatus = auction.paymentStatus ?? 'PENDING'
 
   return (
-    <article className="flex min-w-0 flex-col overflow-hidden border border-stone-200 bg-white">
-      <div className="flex gap-4 border-b border-stone-100 p-4">
-        <div className="aspect-[4/3] w-28 shrink-0 overflow-hidden bg-stone-100">
-          {!imageFailed ? (
+    <article className="surface-card flex min-w-0 flex-col overflow-hidden">
+      <div className="flex gap-4 border-b border-stone-100 p-4 sm:p-5">
+        <div className="aspect-[4/3] w-28 shrink-0 overflow-hidden rounded-[var(--radius-md)] bg-stone-100 sm:w-32">
+          {!imageFailed && auction.image ? (
             <img
               src={auction.image}
               alt=""
               className="h-full w-full object-cover"
+              loading="lazy"
               onError={() => setFailedImageUrl(auction.image)}
             />
-          ) : null}
+          ) : (
+            <div className="grid h-full place-items-center px-2 text-center text-xs font-medium text-stone-500">
+              Image unavailable
+            </div>
+          )}
         </div>
         <div className="min-w-0 flex-1">
           <span
-            className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${STATUS_STYLES[auction.status] ?? STATUS_STYLES.COMPLETED}`}
+            className={`inline-flex rounded-[var(--radius-sm)] px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${STATUS_STYLES[auction.status] ?? STATUS_STYLES.COMPLETED}`}
           >
             {STATUS_LABELS[auction.status] ?? auction.status}
           </span>
-          <h2 className="mt-2 line-clamp-2 font-semibold leading-snug">{auction.title}</h2>
+          <h2 className="mt-2 line-clamp-2 text-lg font-bold leading-snug tracking-[-0.015em]">
+            {auction.title}
+          </h2>
           {auction.category ? (
-            <p className="mt-1 truncate text-xs text-stone-500">
+            <p className="mt-1.5 truncate text-sm text-stone-500">
               {auction.category}
             </p>
           ) : null}
         </div>
       </div>
 
-      <div className="flex flex-1 flex-col p-4">
-        <dl className="grid grid-cols-2 gap-4">
+      <div className="flex flex-1 flex-col p-4 sm:p-5">
+        <dl className="grid grid-cols-2 gap-3 rounded-[var(--radius-md)] bg-stone-50 p-4">
           <div className="min-w-0">
-            <dt className="text-xs uppercase tracking-wide text-stone-500">
+            <dt className="text-xs font-semibold uppercase tracking-[0.08em] text-stone-500">
               {auction.bidCount ? 'Current bid' : 'Starting bid'}
             </dt>
             <dd
-              className="mt-1 overflow-hidden text-ellipsis text-xl font-semibold tabular-nums"
+              className="mt-1.5 overflow-hidden text-ellipsis whitespace-nowrap text-xl font-bold tracking-[-0.02em] tabular-nums"
               title={price.exact}
             >
               {price.display}
             </dd>
           </div>
           <div>
-            <dt className="text-xs uppercase tracking-wide text-stone-500">Bids</dt>
-            <dd className="mt-1 text-xl font-semibold tabular-nums">{auction.bidCount}</dd>
+            <dt className="text-xs font-semibold uppercase tracking-[0.08em] text-stone-500">
+              Bids
+            </dt>
+            <dd className="mt-1.5 text-xl font-bold tabular-nums">
+              {auction.bidCount}
+            </dd>
           </div>
         </dl>
 
-        <div className="mt-5 space-y-2 border-t border-stone-100 pt-4 text-sm text-stone-600">
+        <div className="mt-5 space-y-2.5 text-sm text-stone-600">
           <p className="flex items-start gap-2">
-            <CalendarClock size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
-            <span>Starts {formatDate(auction.startAt)}</span>
+            <CalendarClock
+              size={16}
+              className="mt-0.5 shrink-0 text-stone-500"
+              aria-hidden="true"
+            />
+            <span>
+              Starts{' '}
+              <time dateTime={auction.startAt}>{formatDate(auction.startAt)}</time>
+            </span>
           </p>
-          <p className="pl-6">Ends {formatDate(auction.endAt)}</p>
+          <p className="pl-6">
+            Ends <time dateTime={auction.endAt}>{formatDate(auction.endAt)}</time>
+          </p>
         </div>
 
         {auction.status === 'COMPLETED' ? (
-          <div className="mt-4 border-t border-stone-100 pt-4 text-sm">
-            <p className="text-stone-500">
-              Winner:{' '}
-              <span className="break-words font-medium text-stone-800">
-                {auction.winner?.name ?? 'No winner'}
+          <div className="mt-5 rounded-[var(--radius-md)] border border-stone-200 p-3.5 text-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-stone-500">
+                Winner:{' '}
+                <span className="break-words font-semibold text-stone-800">
+                  {auction.winner?.name ?? 'No winner'}
+                </span>
+              </p>
+              <span
+                className={`rounded-[var(--radius-sm)] px-2 py-1 text-xs font-bold ${
+                  PAYMENT_STYLES[paymentStatus] ?? PAYMENT_STYLES.PENDING
+                }`}
+              >
+                Payment {PAYMENT_LABELS[paymentStatus] ?? 'Pending'}
               </span>
-            </p>
+            </div>
             {auction.winningAmount != null ? (
               <p className="mt-1 text-stone-500">
                 Winning bid:{' '}
-                <span className="font-medium text-stone-800">
+                <span className="font-semibold text-stone-800 tabular-nums">
                   {getCurrencyPresentation(auction.winningAmount).display}
                 </span>
               </p>
             ) : null}
-            <p className="mt-1 text-stone-500">
-              Payment:{' '}
-              <span className="font-medium text-stone-800">
-                {auction.paymentStatus ?? 'Pending'}
-              </span>
-            </p>
           </div>
         ) : auction.currentBidder ? (
-          <p className="mt-4 border-t border-stone-100 pt-4 text-sm text-stone-500">
+          <p className="mt-5 text-sm text-stone-500">
             Highest bidder:{' '}
-            <span className="break-words font-medium text-stone-800">
+            <span className="break-words font-semibold text-stone-800">
               {auction.currentBidder.name}
             </span>
           </p>
@@ -150,7 +202,7 @@ function SellerAuctionCard({ auction, onDelete }) {
           >
             <Link
               to={`/auctions/${auction._id}`}
-              className="inline-flex min-w-0 items-center justify-center gap-1.5 rounded-sm border border-stone-300 px-3 py-2 text-sm font-medium hover:border-emerald-700 hover:text-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:ring-offset-2"
+              className="btn-secondary min-w-0 px-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-green-primary)] focus-visible:ring-offset-2"
             >
               <Eye size={15} aria-hidden="true" /> View
             </Link>
@@ -158,14 +210,14 @@ function SellerAuctionCard({ auction, onDelete }) {
               <>
                 <Link
                   to={`/auctions/${auction._id}/edit`}
-                  className="inline-flex min-w-0 items-center justify-center gap-1.5 rounded-sm border border-stone-300 px-3 py-2 text-sm font-medium hover:border-emerald-700 hover:text-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:ring-offset-2"
+                  className="btn-secondary min-w-0 px-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-green-primary)] focus-visible:ring-offset-2"
                 >
                   <Pencil size={15} aria-hidden="true" /> Edit
                 </Link>
                 <button
                   type="button"
                   onClick={() => onDelete(auction)}
-                  className="inline-flex min-w-0 items-center justify-center gap-1.5 rounded-sm border border-red-200 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-700 focus:ring-offset-2"
+                  className="inline-flex min-h-11 min-w-0 items-center justify-center gap-1.5 rounded-[var(--radius-sm)] border border-red-200 px-3 text-sm font-bold text-red-700 transition hover:border-red-300 hover:bg-red-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-700 focus-visible:ring-offset-2"
                 >
                   <Trash2 size={15} aria-hidden="true" /> Delete
                 </button>
@@ -173,9 +225,9 @@ function SellerAuctionCard({ auction, onDelete }) {
             ) : null}
           </div>
           {!canManage ? (
-            <p className="mt-3 text-xs leading-5 text-stone-500">
-              Only upcoming auctions that have not started and have no bids can
-              be edited or deleted.
+            <p className="mt-2 text-xs leading-5 text-stone-500">
+              Edit and delete are available only before the auction starts and
+              before any bids are placed.
             </p>
           ) : null}
         </div>
@@ -205,6 +257,8 @@ export function SellerDashboardPage() {
     completed: 0,
   }
   const pagination = auctionsQuery.data?.pagination
+  const activeFilter =
+    FILTERS.find((filter) => filter.value === filters.status) ?? FILTERS[0]
 
   useEffect(() => {
     if (
@@ -308,61 +362,101 @@ export function SellerDashboardPage() {
   }
 
   return (
-    <div className="min-h-screen overflow-x-hidden bg-stone-100 text-stone-950">
+    <div className="app-shell">
       <MarketplaceHeader />
-      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 sm:py-10 lg:px-8">
-        <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+      <main className="app-container py-9 sm:py-12 lg:py-14">
+        <div className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p className="text-sm font-semibold text-emerald-800">Seller dashboard</p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight">
+            <p className="page-kicker">Seller dashboard</p>
+            <h1 className="page-title mt-2 break-words">
               Welcome, {user.displayName}
             </h1>
-            <p className="mt-2 text-stone-600">
+            <p className="page-description mt-3">
               Manage upcoming listings and review live or completed auctions.
             </p>
           </div>
           <Link
             to="/auctions/new"
-            className="inline-flex w-fit items-center gap-2 rounded-sm bg-emerald-800 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-900 focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:ring-offset-2"
+            className="btn-primary w-full focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-green-primary)] focus-visible:ring-offset-2 sm:w-auto"
           >
             <Plus size={17} aria-hidden="true" /> Create auction
           </Link>
         </div>
 
-        <dl className="mt-8 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <dl className="mt-9 grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
           {[
-            ['Total auctions', summary.total],
-            ['Upcoming', summary.upcoming],
-            ['Live', summary.active],
-            ['Completed', summary.completed],
-          ].map(([label, value]) => (
-            <div key={label} className="border border-stone-200 bg-white p-4">
-              <dt className="text-sm text-stone-500">{label}</dt>
-              <dd className="mt-2 text-2xl font-semibold tabular-nums">{value}</dd>
+            {
+              label: 'Total auctions',
+              value: summary.total,
+              icon: LayoutGrid,
+              iconStyle:
+                'bg-[var(--color-green-soft)] text-[var(--color-green-primary)]',
+            },
+            {
+              label: 'Upcoming',
+              value: summary.upcoming,
+              icon: CalendarClock,
+              iconStyle: 'bg-amber-50 text-amber-700',
+            },
+            {
+              label: 'Live',
+              value: summary.active,
+              icon: Radio,
+              iconStyle: 'bg-sky-50 text-sky-700',
+            },
+            {
+              label: 'Completed',
+              value: summary.completed,
+              icon: CheckCircle2,
+              iconStyle: 'bg-stone-100 text-stone-700',
+            },
+          ].map(({ label, value, icon: Icon, iconStyle }) => (
+            <div key={label} className="surface-card p-4 sm:p-5">
+              <div className="flex items-start justify-between gap-3">
+                <dt className="text-sm font-semibold text-stone-600">{label}</dt>
+                <span
+                  className={`hidden h-9 w-9 shrink-0 place-items-center rounded-[var(--radius-md)] sm:grid ${iconStyle}`}
+                >
+                  {createElement(Icon, { size: 17, 'aria-hidden': true })}
+                </span>
+              </div>
+              <dd className="mt-3 text-3xl font-bold tracking-[-0.03em] tabular-nums">
+                {value}
+              </dd>
             </div>
           ))}
         </dl>
 
-        <section className="mt-10" aria-labelledby="my-auctions-title">
-          <div className="flex flex-col gap-4 border-b border-stone-200 pb-5 sm:flex-row sm:items-center sm:justify-between">
-            <h2
-              ref={auctionListHeadingRef}
-              id="my-auctions-title"
-              tabIndex="-1"
-              className="text-xl font-semibold outline-none"
+        <section className="mt-12" aria-labelledby="my-auctions-title">
+          <div className="flex flex-col gap-5 border-b border-[var(--color-border)] pb-6 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h2
+                ref={auctionListHeadingRef}
+                id="my-auctions-title"
+                tabIndex="-1"
+                className="text-2xl font-bold tracking-[-0.025em] outline-none"
+              >
+                My auctions
+              </h2>
+              <p className="mt-1.5 text-sm text-stone-500">
+                Showing {activeFilter.label.toLowerCase()} listings
+              </p>
+            </div>
+            <div
+              className="soft-scrollbar flex gap-2 overflow-x-auto pb-1"
+              role="group"
+              aria-label="Auction status filters"
             >
-              My auctions
-            </h2>
-            <div className="flex gap-2 overflow-x-auto pb-1" aria-label="Auction status filters">
               {FILTERS.map((filter) => (
                 <button
                   key={filter.label}
                   type="button"
+                  aria-pressed={filters.status === filter.value}
                   onClick={() => selectStatus(filter.value)}
-                  className={`whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:ring-offset-2 ${
+                  className={`min-h-10 shrink-0 whitespace-nowrap rounded-[var(--radius-sm)] border px-3.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-green-primary)] focus-visible:ring-offset-2 ${
                     filters.status === filter.value
-                      ? 'bg-emerald-800 text-white'
-                      : 'bg-white text-stone-600 ring-1 ring-inset ring-stone-300'
+                      ? 'border-[var(--color-green-primary)] bg-[var(--color-green-soft)] text-[var(--color-green-hover)]'
+                      : 'border-stone-200 bg-white text-stone-600 hover:border-stone-300 hover:text-stone-950'
                   }`}
                 >
                   {filter.label}
@@ -374,13 +468,20 @@ export function SellerDashboardPage() {
           {auctionsQuery.isPending ? <DashboardSkeleton /> : null}
 
           {auctionsQuery.isError ? (
-            <div className="mt-6 border border-red-200 bg-red-50 p-6 text-center">
-              <p className="font-semibold text-red-900">Your auctions could not be loaded.</p>
-              <p className="mt-1 text-sm text-red-800">Check your connection and try again.</p>
+            <div
+              className="surface-card mt-7 px-5 py-10 text-center"
+              role="alert"
+            >
+              <p className="text-lg font-bold text-stone-950">
+                Your auctions could not be loaded
+              </p>
+              <p className="mt-2 text-sm text-stone-600">
+                Check your connection and try again.
+              </p>
               <button
                 type="button"
                 onClick={() => auctionsQuery.refetch()}
-                className="mt-4 rounded-sm bg-red-800 px-4 py-2 text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-red-700 focus:ring-offset-2"
+                className="btn-primary mt-5 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-green-primary)] focus-visible:ring-offset-2"
               >
                 Try again
               </button>
@@ -388,16 +489,44 @@ export function SellerDashboardPage() {
           ) : null}
 
           {auctionsQuery.isSuccess && auctions.length === 0 ? (
-            <div className="mt-6 border-y border-stone-200 py-12 text-center">
-              <h3 className="font-semibold">No auctions in this view</h3>
-              <p className="mt-2 text-sm text-stone-500">
-                Create an auction or choose another status filter.
+            <div className="surface-card mt-7 px-5 py-12 text-center">
+              <span className="mx-auto grid h-11 w-11 place-items-center rounded-[var(--radius-md)] bg-stone-100 text-stone-500">
+                <LayoutGrid size={21} aria-hidden="true" />
+              </span>
+              <h3 className="mt-4 text-lg font-bold">
+                {filters.status
+                  ? `No ${activeFilter.label.toLowerCase()} auctions`
+                  : 'No auctions yet'}
+              </h3>
+              <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-stone-500">
+                {filters.status
+                  ? 'Choose another status to review the rest of your listings.'
+                  : 'Create your first listing and manage it here from scheduling through completion.'}
               </p>
+              {filters.status ? (
+                <button
+                  type="button"
+                  onClick={() => selectStatus('')}
+                  className="btn-secondary mt-5 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-green-primary)] focus-visible:ring-offset-2"
+                >
+                  View all auctions
+                </button>
+              ) : (
+                <Link
+                  to="/auctions/new"
+                  className="btn-primary mt-5 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-green-primary)] focus-visible:ring-offset-2"
+                >
+                  <Plus size={16} aria-hidden="true" /> Create auction
+                </Link>
+              )}
             </div>
           ) : null}
 
           {auctionsQuery.isSuccess && auctions.length > 0 ? (
-            <div className="mt-6 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+            <div
+              className="mt-7 grid gap-6 transition-opacity md:grid-cols-2 xl:grid-cols-3"
+              aria-busy={auctionsQuery.isFetching}
+            >
               {auctions.map((auction) => (
                 <SellerAuctionCard
                   key={auction._id}
@@ -409,21 +538,30 @@ export function SellerDashboardPage() {
           ) : null}
 
           {auctionsQuery.isSuccess && pagination?.totalPages > 1 ? (
-            <nav className="mt-8 flex items-center justify-between border-t border-stone-200 pt-5" aria-label="Seller auction pages">
+            <nav
+              className="surface-card mt-9 flex items-center justify-between gap-3 p-3 sm:p-4"
+              aria-label="Seller auction pages"
+            >
               <button
                 type="button"
                 disabled={pagination.page <= 1 || auctionsQuery.isFetching}
                 onClick={() => setFilters((current) => ({ ...current, page: current.page - 1 }))}
-                className="rounded-sm border border-stone-300 bg-white px-4 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:ring-offset-2 disabled:cursor-not-allowed disabled:text-stone-400"
+                className="btn-secondary min-w-0 px-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-green-primary)] focus-visible:ring-offset-2 sm:px-4"
               >
                 Previous
               </button>
-              <p className="text-sm text-stone-600">Page {pagination.page} of {pagination.totalPages}</p>
+              <p className="text-center text-sm font-medium text-stone-600">
+                Page{' '}
+                <span className="font-bold text-stone-950 tabular-nums">
+                  {pagination.page}
+                </span>{' '}
+                of <span className="tabular-nums">{pagination.totalPages}</span>
+              </p>
               <button
                 type="button"
                 disabled={pagination.page >= pagination.totalPages || auctionsQuery.isFetching}
                 onClick={() => setFilters((current) => ({ ...current, page: current.page + 1 }))}
-                className="rounded-sm border border-stone-300 bg-white px-4 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:ring-offset-2 disabled:cursor-not-allowed disabled:text-stone-400"
+                className="btn-secondary min-w-0 px-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-green-primary)] focus-visible:ring-offset-2 sm:px-4"
               >
                 Next
               </button>

@@ -70,11 +70,20 @@ export function RegisterPage() {
       alternateText="Already have an account?"
       alternateLink={{ to: '/login', label: 'Sign in' }}
     >
-      <form className="space-y-5" onSubmit={handleSubmit(onSubmit)} noValidate>
+      <form
+        className="space-y-5"
+        onSubmit={handleSubmit(onSubmit)}
+        aria-busy={isSubmitting}
+        noValidate
+      >
+        <span className="sr-only" role="status" aria-live="polite">
+          {isSubmitting ? 'Creating your account…' : ''}
+        </span>
         <FormField
           label="Display name"
           type="text"
           autoComplete="name"
+          required
           disabled={isSubmitting}
           error={errors.displayName?.message}
           {...register('displayName')}
@@ -83,6 +92,7 @@ export function RegisterPage() {
           label="Email address"
           type="email"
           autoComplete="email"
+          required
           disabled={isSubmitting}
           error={errors.email?.message}
           {...register('email')}
@@ -91,6 +101,8 @@ export function RegisterPage() {
           label="Password"
           type="password"
           autoComplete="new-password"
+          hint="Use 8–72 characters."
+          required
           disabled={isSubmitting}
           error={errors.password?.message}
           {...register('password')}
@@ -99,6 +111,7 @@ export function RegisterPage() {
           label="Confirm password"
           type="password"
           autoComplete="new-password"
+          required
           disabled={isSubmitting}
           error={errors.confirmPassword?.message}
           {...register('confirmPassword')}
@@ -106,7 +119,7 @@ export function RegisterPage() {
 
         {serverError ? (
           <p
-            className="border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+            className="feedback-error px-3 py-2.5 text-sm"
             role="alert"
           >
             {serverError}
@@ -116,7 +129,7 @@ export function RegisterPage() {
         <button
           type="submit"
           disabled={isSubmitting}
-          className="w-full bg-emerald-800 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-900 focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-stone-400"
+          className="btn-primary w-full"
         >
           {isSubmitting ? 'Creating account…' : 'Create account'}
         </button>

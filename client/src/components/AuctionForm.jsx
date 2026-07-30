@@ -1,5 +1,12 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { ArrowRight, CalendarClock, Gavel, ImageIcon, Package } from 'lucide-react'
+import {
+  ArrowRight,
+  CalendarClock,
+  Gavel,
+  ImageIcon,
+  LoaderCircle,
+  Package,
+} from 'lucide-react'
 import { createElement, useState } from 'react'
 import { useForm, useWatch } from 'react-hook-form'
 import { Link } from 'react-router-dom'
@@ -90,11 +97,11 @@ const DEFAULT_VALUES = {
 }
 
 const inputClassName =
-  'mt-2 w-full rounded-sm border border-stone-300 bg-white px-3 py-2.5 text-stone-950 outline-none transition placeholder:text-stone-400 focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/20 disabled:cursor-not-allowed disabled:bg-stone-100'
+  'field-control mt-2 placeholder:text-stone-400'
 
 function FieldError({ id, message }) {
   return message ? (
-    <span id={id} className="mt-1.5 block text-sm text-red-700" role="alert">
+    <span id={id} className="mt-1.5 block text-sm text-red-700">
       {message}
     </span>
   ) : null
@@ -102,13 +109,15 @@ function FieldError({ id, message }) {
 
 function SectionHeading({ icon: Icon, title, description }) {
   return (
-    <div className="mb-5 flex items-start gap-3 border-b border-stone-200 pb-4">
-      <span className="grid h-9 w-9 shrink-0 place-items-center bg-emerald-50 text-emerald-800">
+    <div className="mb-6 flex items-start gap-3">
+      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-[var(--color-green-soft)] text-[var(--color-green-primary)]">
         {createElement(Icon, { size: 18, 'aria-hidden': true })}
       </span>
-      <div>
-        <h2 className="font-semibold text-stone-950">{title}</h2>
-        <p className="mt-1 text-sm text-stone-500">{description}</p>
+      <div className="min-w-0">
+        <h2 className="text-lg font-semibold text-stone-950">{title}</h2>
+        <p className="mt-1 max-w-2xl text-sm leading-6 text-stone-600">
+          {description}
+        </p>
       </div>
     </div>
   )
@@ -148,8 +157,12 @@ export function AuctionForm({
     resolver: zodResolver(auctionSchema),
     defaultValues: { ...DEFAULT_VALUES, ...initialValues },
   })
-  const image = useWatch({ control, name: 'image' })
+  const [image, title, description] = useWatch({
+    control,
+    name: ['image', 'title', 'description'],
+  })
   const formDisabled = isSubmitting
+  const errorCount = Object.keys(errors).length
 
   async function submitForm(values) {
     setSubmissionError('')
@@ -175,15 +188,30 @@ export function AuctionForm({
   }
 
   return (
-    <form onSubmit={handleSubmit(submitForm)} className="mt-8 space-y-6" noValidate>
-      <section className="border border-stone-200 bg-white p-5 sm:p-6">
+    <form
+      onSubmit={handleSubmit(submitForm)}
+      className="surface-card mt-8 overflow-hidden"
+      aria-busy={isSubmitting || isUploading}
+      noValidate
+    >
+      {errorCount > 0 ? (
+        <div
+          className="feedback-error m-5 px-4 py-3 text-sm sm:m-7"
+          role="alert"
+        >
+          Review {errorCount} {errorCount === 1 ? 'field' : 'fields'} marked
+          below before submitting.
+        </div>
+      ) : null}
+
+      <section className="border-b border-stone-200 p-5 sm:p-7">
         <SectionHeading
           icon={Package}
           title="Product information"
           description="Help buyers understand exactly what is being offered."
         />
         <div className="space-y-5">
-          <label className="block text-sm font-medium">
+          <label className="field-label">
             Auction title <span className="text-red-700" aria-hidden="true">*</span>
             <input
               id="auction-title"
@@ -196,10 +224,13 @@ export function AuctionForm({
               className={inputClassName}
               {...register('title')}
             />
+            <span className="field-help flex justify-end tabular-nums">
+              {(title ?? '').length}/120
+            </span>
             <FieldError id="auction-title-error" message={errors.title?.message} />
           </label>
 
-          <label className="block text-sm font-medium">
+          <label className="field-label">
             Description <span className="text-red-700" aria-hidden="true">*</span>
             <textarea
               id="auction-description"
@@ -217,9 +248,15 @@ export function AuctionForm({
             />
             <span
               id="auction-description-help"
-              className="mt-1.5 block text-xs font-normal text-stone-500"
+              className="field-help flex items-start justify-between gap-3 font-normal"
             >
-              Include condition, key details, and what the winner will receive.
+              <span>
+                Include condition, key details, and what the winner will
+                receive.
+              </span>
+              <span className="shrink-0 tabular-nums">
+                {(description ?? '').length}/2000
+              </span>
             </span>
             <FieldError
               id="auction-description-error"
@@ -227,7 +264,7 @@ export function AuctionForm({
             />
           </label>
 
-          <label className="block text-sm font-medium">
+          <label className="field-label">
             Category <span className="font-normal text-stone-500">(optional)</span>
             <input
               id="auction-category"
@@ -250,7 +287,7 @@ export function AuctionForm({
         </div>
       </section>
 
-      <section className="border border-stone-200 bg-white p-5 sm:p-6">
+      <section className="border-b border-stone-200 p-5 sm:p-7">
         <SectionHeading
           icon={ImageIcon}
           title="Product image"
@@ -276,14 +313,14 @@ export function AuctionForm({
         />
       </section>
 
-      <section className="border border-stone-200 bg-white p-5 sm:p-6">
+      <section className="border-b border-stone-200 p-5 sm:p-7">
         <SectionHeading
           icon={Gavel}
           title="Bidding rules"
           description="Set a clear opening amount and minimum step for each new bid."
         />
         <div className="grid gap-5 sm:grid-cols-2">
-          <label className="block text-sm font-medium">
+          <label className="field-label">
             Starting bid (₹) <span className="text-red-700" aria-hidden="true">*</span>
             <input
               id="auction-start-bid"
@@ -305,7 +342,7 @@ export function AuctionForm({
               message={errors.startBid?.message}
             />
           </label>
-          <label className="block text-sm font-medium">
+          <label className="field-label">
             Minimum increment (₹) <span className="text-red-700" aria-hidden="true">*</span>
             <input
               id="auction-minimum-increment"
@@ -332,14 +369,14 @@ export function AuctionForm({
         </div>
       </section>
 
-      <section className="border border-stone-200 bg-white p-5 sm:p-6">
+      <section className="border-b border-stone-200 p-5 sm:p-7">
         <SectionHeading
           icon={CalendarClock}
           title="Auction schedule"
           description="Times are shown in your local timezone. Both dates must remain in the future."
         />
         <div className="grid gap-5 sm:grid-cols-2">
-          <label className="block text-sm font-medium">
+          <label className="field-label">
             Starts <span className="text-red-700" aria-hidden="true">*</span>
             <input
               id="auction-start-at"
@@ -359,7 +396,7 @@ export function AuctionForm({
               message={errors.startAt?.message}
             />
           </label>
-          <label className="block text-sm font-medium">
+          <label className="field-label">
             Ends <span className="text-red-700" aria-hidden="true">*</span>
             <input
               id="auction-end-at"
@@ -377,7 +414,7 @@ export function AuctionForm({
         </div>
       </section>
 
-      <section className="border border-stone-200 bg-white p-5 sm:p-6">
+      <section className="bg-stone-50/80 p-5 sm:p-7">
         <SectionHeading
           icon={ArrowRight}
           title="Review and submit"
@@ -385,7 +422,7 @@ export function AuctionForm({
         />
 
         {submissionError ? (
-          <p className="mb-4 border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert">
+          <p className="feedback-error mb-4 p-3 text-sm" role="alert">
             {submissionError}
           </p>
         ) : null}
@@ -400,10 +437,10 @@ export function AuctionForm({
                 event.preventDefault()
               }
             }}
-            className={`rounded-sm border border-stone-300 bg-white px-5 py-2.5 text-center text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:ring-offset-2 ${
+            className={`btn-secondary px-5 text-center ${
               formDisabled
                 ? 'cursor-not-allowed text-stone-400'
-                : 'text-stone-800 hover:border-stone-400'
+                : ''
             }`}
           >
             Cancel
@@ -411,8 +448,15 @@ export function AuctionForm({
           <button
             type="submit"
             disabled={isSubmitting || isUploading}
-            className="rounded-sm bg-emerald-800 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-900 focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-stone-400"
+            className="btn-primary min-w-40 px-5"
           >
+            {isSubmitting || isUploading ? (
+              <LoaderCircle
+                size={16}
+                className="animate-spin motion-reduce:animate-none"
+                aria-hidden="true"
+              />
+            ) : null}
             {isUploading
               ? 'Waiting for image upload…'
               : isSubmitting

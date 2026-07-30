@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { Toaster } from 'sonner'
 
 import { GuestRoute } from './components/GuestRoute.jsx'
+import { FullPageLoadingState } from './components/FullPageLoadingState.jsx'
 import { ProtectedRoute } from './components/ProtectedRoute.jsx'
 import { AccountPage } from './pages/AccountPage.jsx'
 import { AuctionDetailsPage } from './pages/AuctionDetailsPage.jsx'
@@ -10,6 +11,7 @@ import { AuctionDiscoveryPage } from './pages/AuctionDiscoveryPage.jsx'
 import { CreateAuctionPage } from './pages/CreateAuctionPage.jsx'
 import { EditAuctionPage } from './pages/EditAuctionPage.jsx'
 import { LoginPage } from './pages/LoginPage.jsx'
+import { NotFoundPage } from './pages/NotFoundPage.jsx'
 import { RegisterPage } from './pages/RegisterPage.jsx'
 import { SellerDashboardPage } from './pages/SellerDashboardPage.jsx'
 
@@ -20,14 +22,7 @@ const LandingPage = lazy(() =>
 )
 
 function LandingFallback() {
-  return (
-    <div
-      className="grid min-h-screen place-items-center bg-stone-100 text-sm font-medium text-stone-600"
-      role="status"
-    >
-      Loading BidArena…
-    </div>
-  )
+  return <FullPageLoadingState />
 }
 
 function App() {
@@ -56,7 +51,7 @@ function App() {
             </Suspense>
           }
         />
-        <Route path="*" element={<Navigate to="/auctions" replace />} />
+        <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </>
   )

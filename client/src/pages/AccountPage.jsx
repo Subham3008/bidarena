@@ -1,6 +1,13 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { LockKeyhole, MapPin, Pencil, UserRound } from 'lucide-react'
-import { useState } from 'react'
+import {
+  CalendarDays,
+  LockKeyhole,
+  MapPin,
+  Pencil,
+  ShieldCheck,
+  UserRound,
+} from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -60,6 +67,28 @@ function FieldError({ id, message }) {
   ) : null
 }
 
+function formatMemberSince(value) {
+  const date = new Date(value)
+
+  return Number.isNaN(date.getTime())
+    ? 'Date unavailable'
+    : date.toLocaleDateString([], {
+        month: 'long',
+        year: 'numeric',
+      })
+}
+
+function getAvatarPreviewUrl(value) {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'http:' || url.protocol === 'https:'
+      ? url.toString()
+      : ''
+  } catch {
+    return ''
+  }
+}
+
 export function AccountPage() {
   const { user, logout, updateProfile } = useAuth()
   const navigate = useNavigate()
@@ -67,6 +96,9 @@ export function AccountPage() {
   const [isLoggingOut, setIsLoggingOut] = useState(false)
   const [logoutError, setLogoutError] = useState('')
   const [saveError, setSaveError] = useState('')
+  const [avatarPreviewUrl, setAvatarPreviewUrl] = useState(user.avatar ?? '')
+  const editButtonRef = useRef(null)
+  const shouldRestoreEditFocusRef = useRef(false)
   const {
     register,
     handleSubmit,
@@ -85,8 +117,20 @@ export function AccountPage() {
   })
 
   const previewName = watch('displayName')
-  const previewAvatar = watch('avatar')
   const bio = watch('bio')
+  const avatarField = register('avatar')
+
+  useEffect(() => {
+    if (isEditing) {
+      document.getElementById('profile-name')?.focus()
+      return
+    }
+
+    if (shouldRestoreEditFocusRef.current) {
+      shouldRestoreEditFocusRef.current = false
+      editButtonRef.current?.focus()
+    }
+  }, [isEditing])
 
   async function handleLogout() {
     setIsLoggingOut(true)
@@ -115,28 +159,34 @@ export function AccountPage() {
         bio: updatedUser.bio ?? '',
         location: updatedUser.location ?? '',
       })
+      setAvatarPreviewUrl(updatedUser.avatar ?? '')
+      shouldRestoreEditFocusRef.current = true
       setIsEditing(false)
       toast.success('Profile updated successfully')
     } catch (error) {
       const details = error.response?.data?.error?.details ?? []
+      let hasMappedFieldError = false
 
       for (const detail of details) {
         if (detail.field in values) {
+          hasMappedFieldError = true
           setError(detail.field, { type: 'server', message: detail.message })
         }
       }
 
-      const message = getApiErrorMessage(
-        error,
-        'Profile could not be updated. Please try again.',
-      )
-      setSaveError(message)
-      toast.error(message)
+      if (!hasMappedFieldError) {
+        const message = getApiErrorMessage(
+          error,
+          'Profile could not be updated. Please try again.',
+        )
+        setSaveError(message)
+      }
     }
   }
 
   function startEditing() {
     setSaveError('')
+    setAvatarPreviewUrl(user.avatar ?? '')
     setIsEditing(true)
   }
 
@@ -147,37 +197,40 @@ export function AccountPage() {
       bio: user.bio ?? '',
       location: user.location ?? '',
     })
+    setAvatarPreviewUrl(user.avatar ?? '')
     setSaveError('')
+    shouldRestoreEditFocusRef.current = true
     setIsEditing(false)
   }
 
   const inputClassName =
-    'mt-2 w-full rounded-sm border border-stone-300 bg-white px-3 py-2.5 text-stone-950 outline-none transition placeholder:text-stone-400 focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/20 disabled:cursor-not-allowed disabled:bg-stone-100 disabled:text-stone-500'
+    'field-control mt-2 placeholder:text-stone-400'
 
   return (
-    <div className="min-h-screen bg-stone-100 text-stone-950">
+    <div className="app-shell">
       <MarketplaceHeader />
-      <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-12 lg:px-8">
+      <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-12 lg:px-8">
         <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p className="text-sm font-semibold text-emerald-800">Your account</p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight">Profile</h1>
-            <p className="mt-2 max-w-xl text-stone-600">
+            <p className="page-kicker">Your account</p>
+            <h1 className="page-title mt-2">Profile</h1>
+            <p className="page-description mt-3">
               Manage the public information shown with your BidArena account.
             </p>
           </div>
           {!isEditing ? (
             <button
+              ref={editButtonRef}
               type="button"
               onClick={startEditing}
-              className="inline-flex w-fit items-center gap-2 rounded-sm border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold transition hover:border-emerald-700 hover:text-emerald-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 focus-visible:ring-offset-2"
+              className="btn-secondary w-fit"
             >
               <Pencil size={16} aria-hidden="true" /> Edit profile
             </button>
           ) : null}
         </header>
 
-        <section className="mt-8 overflow-hidden rounded-md border border-stone-200 bg-white shadow-sm">
+        <section className="surface-card mt-8 overflow-hidden">
           {!isEditing ? (
             <div className="p-6 sm:p-8">
               <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
@@ -195,17 +248,56 @@ export function AccountPage() {
                   ) : null}
                 </div>
               </div>
-              <div className="mt-7 border-t border-stone-200 pt-6">
-                <h3 className="text-sm font-semibold uppercase tracking-wide text-stone-500">
-                  About
-                </h3>
-                <p className="mt-3 max-w-2xl whitespace-pre-wrap break-words leading-7 text-stone-700">
-                  {user.bio || 'Add a short bio to introduce yourself to other marketplace users.'}
-                </p>
+              <div className="mt-7 grid gap-6 border-t border-stone-200 pt-6 md:grid-cols-[minmax(0,1fr)_16rem]">
+                <div>
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-stone-500">
+                    About
+                  </h3>
+                  <p className="mt-3 max-w-2xl whitespace-pre-wrap break-words leading-7 text-stone-700">
+                    {user.bio ||
+                      'Add a short bio to introduce yourself to other marketplace users.'}
+                  </p>
+                </div>
+                <dl className="surface-muted space-y-4 p-4 text-sm">
+                  <div className="flex items-start gap-3">
+                    <CalendarDays
+                      size={17}
+                      className="mt-0.5 shrink-0 text-stone-500"
+                      aria-hidden="true"
+                    />
+                    <div>
+                      <dt className="font-medium text-stone-900">
+                        BidArena member
+                      </dt>
+                      <dd className="mt-0.5 text-stone-600">
+                        Since {formatMemberSince(user.createdAt)}
+                      </dd>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <ShieldCheck
+                      size={17}
+                      className="mt-0.5 shrink-0 text-emerald-700"
+                      aria-hidden="true"
+                    />
+                    <div>
+                      <dt className="font-medium text-stone-900">
+                        Active account
+                      </dt>
+                      <dd className="mt-0.5 text-stone-600">
+                        Signed in securely
+                      </dd>
+                    </div>
+                  </div>
+                </dl>
               </div>
             </div>
           ) : (
-            <form onSubmit={handleSubmit(saveProfile)} noValidate>
+            <form
+              onSubmit={handleSubmit(saveProfile)}
+              aria-busy={isSubmitting}
+              noValidate
+            >
               <div className="grid lg:grid-cols-[15rem_minmax(0,1fr)]">
                 <aside className="border-b border-stone-200 bg-stone-50 p-6 lg:border-b-0 lg:border-r lg:p-8">
                   <p className="text-sm font-semibold text-stone-900">
@@ -213,9 +305,9 @@ export function AccountPage() {
                   </p>
                   <div className="mt-4">
                     <Avatar
-                      key={previewAvatar || 'avatar-fallback'}
+                      key={avatarPreviewUrl || 'avatar-fallback'}
                       name={previewName || user.displayName}
-                      src={previewAvatar}
+                      src={avatarPreviewUrl}
                       preview
                     />
                   </div>
@@ -226,7 +318,7 @@ export function AccountPage() {
                 </aside>
 
                 <div className="space-y-5 p-6 sm:p-8">
-                  <label className="block text-sm font-medium" htmlFor="profile-name">
+                  <label className="field-label" htmlFor="profile-name">
                     Display name{' '}
                     <span className="text-red-700" aria-hidden="true">*</span>
                     <input
@@ -248,7 +340,7 @@ export function AccountPage() {
                     />
                   </label>
 
-                  <label className="block text-sm font-medium" htmlFor="profile-email">
+                  <label className="field-label" htmlFor="profile-email">
                     Email address
                     <div className="relative">
                       <input
@@ -258,7 +350,7 @@ export function AccountPage() {
                         disabled
                         readOnly
                         aria-describedby="profile-email-help"
-                        className={`${inputClassName} pr-10`}
+                        className={`${inputClassName} !pr-10`}
                       />
                       <LockKeyhole
                         size={16}
@@ -268,13 +360,13 @@ export function AccountPage() {
                     </div>
                     <span
                       id="profile-email-help"
-                      className="mt-1.5 block text-xs text-stone-500"
+                      className="field-help block"
                     >
                       Your sign-in email cannot be changed here.
                     </span>
                   </label>
 
-                  <label className="block text-sm font-medium" htmlFor="profile-avatar">
+                  <label className="field-label" htmlFor="profile-avatar">
                     Avatar URL
                     <input
                       id="profile-avatar"
@@ -288,7 +380,13 @@ export function AccountPage() {
                       disabled={isSubmitting}
                       placeholder="https://example.com/avatar.jpg"
                       className={inputClassName}
-                      {...register('avatar')}
+                      {...avatarField}
+                      onBlur={(event) => {
+                        avatarField.onBlur(event)
+                        setAvatarPreviewUrl(
+                          getAvatarPreviewUrl(event.target.value.trim()),
+                        )
+                      }}
                     />
                     <FieldError
                       id="profile-avatar-error"
@@ -296,7 +394,7 @@ export function AccountPage() {
                     />
                   </label>
 
-                  <label className="block text-sm font-medium" htmlFor="profile-bio">
+                  <label className="field-label" htmlFor="profile-bio">
                     Short bio
                     <textarea
                       id="profile-bio"
@@ -313,7 +411,7 @@ export function AccountPage() {
                     />
                     <span
                       id="profile-bio-help"
-                      className="mt-1.5 flex items-start justify-between gap-3 text-xs text-stone-500"
+                      className="field-help flex items-start justify-between gap-3"
                     >
                       <span>Visible on your public marketplace identity.</span>
                       <span>{bio?.length ?? 0}/280</span>
@@ -324,7 +422,7 @@ export function AccountPage() {
                     />
                   </label>
 
-                  <label className="block text-sm font-medium" htmlFor="profile-location">
+                  <label className="field-label" htmlFor="profile-location">
                     Location
                     <input
                       id="profile-location"
@@ -347,7 +445,7 @@ export function AccountPage() {
 
                   {saveError ? (
                     <p
-                      className="rounded-sm border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+                      className="feedback-error px-3 py-2.5 text-sm"
                       role="alert"
                     >
                       {saveError}
@@ -361,14 +459,14 @@ export function AccountPage() {
                   type="button"
                   onClick={cancelEditing}
                   disabled={isSubmitting}
-                  className="rounded-sm border border-stone-300 bg-white px-5 py-2.5 text-sm font-semibold transition hover:border-stone-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:text-stone-400"
+                  className="btn-secondary px-5"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmitting || !isDirty}
-                  className="rounded-sm bg-emerald-800 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-stone-400"
+                  className="btn-primary px-5"
                 >
                   {isSubmitting ? 'Saving…' : 'Save changes'}
                 </button>
@@ -377,7 +475,7 @@ export function AccountPage() {
           )}
         </section>
 
-        <section className="mt-6 flex flex-col gap-4 rounded-md border border-stone-200 bg-white p-5 sm:flex-row sm:items-center sm:justify-between">
+        <section className="surface-card mt-6 flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-stone-100 text-stone-600">
               <UserRound size={20} aria-hidden="true" />
@@ -391,13 +489,16 @@ export function AccountPage() {
             type="button"
             onClick={handleLogout}
             disabled={isLoggingOut}
-            className="w-fit rounded-sm border border-stone-300 bg-white px-4 py-2 text-sm font-semibold transition hover:border-stone-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:text-stone-400"
+            className="btn-secondary w-full sm:w-auto"
           >
             {isLoggingOut ? 'Signing out…' : 'Sign out'}
           </button>
         </section>
         {logoutError ? (
-          <p className="mt-4 text-sm text-red-700" role="alert">
+          <p
+            className="feedback-error mt-4 px-3 py-2.5 text-sm"
+            role="alert"
+          >
             {logoutError}
           </p>
         ) : null}

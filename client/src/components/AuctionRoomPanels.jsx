@@ -1,12 +1,16 @@
 import {
   ArrowDown,
+  Eye,
   Flame,
+  Gauge,
+  Gavel,
   MessageCircle,
   Radio,
   RefreshCw,
   Send,
+  Users,
 } from 'lucide-react'
-import { useEffect, useId, useRef, useState } from 'react'
+import { Fragment, useEffect, useId, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { MAX_CHAT_MESSAGE_LENGTH } from '../hooks/useAuctionRoom.js'
@@ -45,10 +49,44 @@ function formatMessageTime(value) {
 
   return Number.isNaN(date.getTime())
     ? 'Time unavailable'
-    : date.toLocaleString([], {
-        dateStyle: 'medium',
+    : date.toLocaleTimeString([], {
         timeStyle: 'short',
       })
+}
+
+function messageDayKey(value) {
+  if (!value) {
+    return ''
+  }
+
+  const date = new Date(value)
+
+  return Number.isNaN(date.getTime())
+    ? ''
+    : `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`
+}
+
+function formatMessageDay(value) {
+  if (!value) {
+    return 'Earlier'
+  }
+
+  const date = new Date(value)
+
+  return Number.isNaN(date.getTime())
+    ? 'Earlier'
+    : date.toLocaleDateString([], {
+        dateStyle: 'medium',
+      })
+}
+
+function latestMessagePreview(message) {
+  if (!message) {
+    return 'No messages yet'
+  }
+
+  const text = message.text.replace(/\s+/g, ' ').trim()
+  return `${message.sender.name}: ${text || 'Message'}`
 }
 
 function formatLastBidTime(value, bidCount) {
@@ -152,6 +190,8 @@ export function AuctionChatPanel({
   role,
   isAuthenticated,
   auctionStatus,
+  currentUserId,
+  sellerId,
   isSelected,
   onSend,
   onRetry,
@@ -181,6 +221,20 @@ export function AuctionChatPanel({
     Boolean(trimmedDraft) &&
     !hasInvalidLength
   const latestMessageKey = renderedMessageKey(messages.at(-1))
+  const latestMessage = messages.at(-1)
+  const connectionLabel =
+    {
+      connected: 'Connected',
+      connecting: 'Connecting',
+      reconnecting: 'Reconnecting',
+      disconnected: 'Disconnected',
+    }[connectionState] ?? 'Connecting'
+  const roleLabel =
+    {
+      SELLER: 'Seller access',
+      BIDDER: 'Bidder access',
+      SPECTATOR: 'Read-only',
+    }[role] ?? 'Checking access'
 
   useEffect(() => {
     const messageLog = messageLogRef.current
@@ -281,6 +335,22 @@ export function AuctionChatPanel({
     }
   }
 
+  function handleComposerKeyDown(event) {
+    if (
+      event.key !== 'Enter' ||
+      event.shiftKey ||
+      event.nativeEvent.isComposing
+    ) {
+      return
+    }
+
+    event.preventDefault()
+
+    if (canSubmit) {
+      event.currentTarget.form?.requestSubmit?.()
+    }
+  }
+
   const readOnlyMessage = !isAuthenticated
     ? 'Only signed-in sellers and bidders can send messages. Spectators can still follow the conversation.'
     : !CHAT_ROLES.has(role)
@@ -291,27 +361,42 @@ export function AuctionChatPanel({
 
   return (
     <section
-      className="flex h-[min(34rem,70dvh)] min-h-[18rem] min-w-0 flex-col border border-stone-200 bg-white sm:min-h-[26rem]"
+      className="surface-card flex h-[min(42rem,76dvh)] min-h-[22rem] min-w-0 flex-col overflow-hidden sm:min-h-[30rem]"
       aria-labelledby="auction-chat-heading"
     >
-      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-stone-200 px-4 py-3">
-        <div className="min-w-0">
-          <h2
-            id="auction-chat-heading"
-            className="flex items-center gap-2 font-semibold"
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-stone-200 bg-white px-4 py-3.5">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--color-green-soft)] text-[var(--color-green-primary)]">
+            <MessageCircle size={19} aria-hidden="true" />
+          </span>
+          <div className="min-w-0">
+            <h2 id="auction-chat-heading" className="font-semibold">
+              Auction chat
+            </h2>
+            <p
+              className="mt-0.5 truncate text-xs text-stone-500"
+              title={latestMessagePreview(latestMessage)}
+            >
+              {latestMessagePreview(latestMessage)}
+            </p>
+          </div>
+        </div>
+        <div className="shrink-0 text-right">
+          <p
+            className={`flex items-center justify-end gap-1.5 text-xs font-semibold ${
+              connectionState === 'connected'
+                ? 'text-emerald-800'
+                : 'text-amber-800'
+            }`}
+            role="status"
           >
-            <MessageCircle size={17} aria-hidden="true" />
-            Auction chat
-          </h2>
+            <Radio size={12} aria-hidden="true" />
+            {isLoading ? 'Refreshing…' : connectionLabel}
+          </p>
           <p className="mt-0.5 text-xs text-stone-500">
-            Latest 50 messages
+            {roleLabel} · latest 50
           </p>
         </div>
-        {isLoading ? (
-          <span className="text-xs font-medium text-stone-500" role="status">
-            Refreshing…
-          </span>
-        ) : null}
       </div>
 
       {connectionState !== 'connected' ? (
@@ -340,10 +425,10 @@ export function AuctionChatPanel({
         </div>
       ) : null}
 
-      <div className="relative min-h-0 flex-1">
+      <div className="chat-canvas relative min-h-0 flex-1">
         <ol
           ref={messageLogRef}
-          className="h-full min-w-0 overflow-y-auto overscroll-contain px-4 [scrollbar-gutter:stable]"
+          className="soft-scrollbar h-full min-w-0 overflow-y-auto overscroll-contain px-3 py-3 sm:px-4 [scrollbar-gutter:stable]"
           role="log"
           aria-label="Auction chat messages"
           aria-live="polite"
@@ -361,32 +446,86 @@ export function AuctionChatPanel({
               No messages yet. Start the conversation when your role allows it.
             </li>
           ) : null}
-          {messages.map((message) => (
-            <li
-              key={
-                renderedMessageKey(message)
-              }
-              className="flex min-w-0 gap-2.5 border-b border-stone-100 py-3 last:border-b-0"
-            >
-              <ChatAvatar sender={message.sender} />
-              <div className="min-w-0 flex-1">
-                <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                  <p className="max-w-full break-words text-sm font-semibold text-stone-900 [overflow-wrap:anywhere]">
-                    {message.sender.name}
-                  </p>
-                  <time
-                    className="text-[0.68rem] text-stone-500"
-                    dateTime={message.createdAt ?? undefined}
+          {messages.map((message, index) => {
+            const messageKey = renderedMessageKey(message)
+            const isOwnMessage = Boolean(
+              currentUserId &&
+                message.sender.id &&
+                currentUserId === message.sender.id,
+            )
+            const isSellerMessage = Boolean(
+              sellerId &&
+                message.sender.id &&
+                sellerId === message.sender.id,
+            )
+            const showDaySeparator =
+              index === 0 ||
+              messageDayKey(messages[index - 1]?.createdAt) !==
+                messageDayKey(message.createdAt)
+
+            return (
+              <Fragment key={messageKey}>
+                {showDaySeparator ? (
+                  <li
+                    className="flex justify-center py-3"
+                    role="separator"
+                    aria-label={formatMessageDay(message.createdAt)}
                   >
-                    {formatMessageTime(message.createdAt)}
-                  </time>
-                </div>
-                <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-5 text-stone-700 [overflow-wrap:anywhere]">
-                  {message.text}
-                </p>
-              </div>
-            </li>
-          ))}
+                    <span className="rounded-full bg-white/90 px-3 py-1 text-xs font-medium text-stone-500 shadow-sm ring-1 ring-stone-200">
+                      {formatMessageDay(message.createdAt)}
+                    </span>
+                  </li>
+                ) : null}
+                <li
+                  className={`flex min-w-0 items-end gap-2 py-1 ${
+                    isOwnMessage ? 'justify-end' : 'justify-start'
+                  }`}
+                >
+                  {!isOwnMessage ? (
+                    <ChatAvatar sender={message.sender} />
+                  ) : null}
+                  <div
+                    className={`min-w-0 max-w-[84%] rounded-[var(--radius-lg)] px-3 py-2 shadow-sm sm:max-w-[78%] ${
+                      isOwnMessage
+                        ? 'rounded-br-sm bg-[var(--color-green-primary)] text-white'
+                        : 'rounded-bl-sm bg-white text-stone-800 ring-1 ring-stone-200'
+                    }`}
+                  >
+                    {isOwnMessage ? (
+                      <span className="sr-only">You said: </span>
+                    ) : null}
+                    {!isOwnMessage ? (
+                      <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                        <p className="max-w-full break-words text-xs font-semibold text-stone-900 [overflow-wrap:anywhere]">
+                          {message.sender.name}
+                        </p>
+                        <span
+                          className={`text-xs font-medium ${
+                            isSellerMessage
+                              ? 'text-emerald-700'
+                              : 'text-stone-500'
+                          }`}
+                        >
+                          {isSellerMessage ? 'Seller' : 'Bidder'}
+                        </span>
+                      </div>
+                    ) : null}
+                    <p className="whitespace-pre-wrap break-words text-sm leading-5 [overflow-wrap:anywhere]">
+                      {message.text}
+                    </p>
+                    <time
+                      className={`mt-1 block text-right text-xs ${
+                        isOwnMessage ? 'text-emerald-100' : 'text-stone-500'
+                      }`}
+                      dateTime={message.createdAt ?? undefined}
+                    >
+                      {formatMessageTime(message.createdAt)}
+                    </time>
+                  </div>
+                </li>
+              </Fragment>
+            )
+          })}
         </ol>
 
         {unreadCount > 0 ? (
@@ -401,7 +540,7 @@ export function AuctionChatPanel({
         ) : null}
       </div>
 
-      <div className="shrink-0 border-t border-stone-200 p-4">
+      <div className="shrink-0 border-t border-stone-200 bg-white p-4">
         {readOnlyMessage ? (
           <p className="text-sm leading-5 text-stone-600">
             {readOnlyMessage}{' '}
@@ -446,7 +585,8 @@ export function AuctionChatPanel({
                 .filter(Boolean)
                 .join(' ') || undefined}
               onChange={handleDraftChange}
-              className="mt-2 block w-full resize-none rounded-sm border border-stone-300 px-3 py-2 text-sm leading-5 outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/20 disabled:bg-stone-100"
+              onKeyDown={handleComposerKeyDown}
+              className="field-control mt-2 block !min-h-[4.25rem] w-full resize-none !rounded-[var(--radius-md)] text-sm leading-5"
             />
             <div className="mt-2 flex min-w-0 items-center justify-between gap-3">
               <div className="min-w-0">
@@ -466,7 +606,7 @@ export function AuctionChatPanel({
               <button
                 type="submit"
                 disabled={!canSubmit}
-                className="inline-flex shrink-0 items-center gap-2 rounded-sm bg-emerald-800 px-3.5 py-2 text-sm font-semibold text-white hover:bg-emerald-900 focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-stone-400"
+                className="btn-primary shrink-0 px-4"
               >
                 <Send size={14} aria-hidden="true" />
                 {isSending ? 'Sending…' : 'Send'}
@@ -488,12 +628,15 @@ export function AuctionChatPanel({
   )
 }
 
-function Metric({ label, presentation, className = '' }) {
+function Metric({ label, presentation, icon }) {
   return (
-    <div
-      className={`min-w-0 border border-stone-200 bg-stone-50 p-3 ${className}`}
-    >
-      <dt className="text-xs leading-4 text-stone-500">{label}</dt>
+    <div className="min-w-0 p-2.5">
+      <dt className="flex items-center gap-1.5 text-xs leading-4 text-stone-500">
+        <span className="shrink-0" aria-hidden="true">
+          {icon}
+        </span>
+        {label}
+      </dt>
       <dd
         className="mt-1.5 min-w-0 break-words text-lg font-semibold tabular-nums text-stone-900 [overflow-wrap:anywhere]"
         title={presentation.exact || undefined}
@@ -537,7 +680,7 @@ export function AuctionInsightsPanel({
 
   return (
     <section
-      className="min-w-0 border border-stone-200 bg-white p-4"
+      className="surface-card min-w-0 p-4"
       aria-labelledby="auction-insights-heading"
     >
       <div className="flex min-w-0 items-start justify-between gap-3">
@@ -563,8 +706,10 @@ export function AuctionInsightsPanel({
           <Radio size={14} aria-hidden="true" />
           {connectionLabel}
         </span>
-        <span className="max-w-full break-words rounded-full bg-stone-100 px-2.5 py-1 text-xs font-semibold text-stone-700 ring-1 ring-inset ring-stone-200">
-          {role ?? 'Synchronising'}
+        <span className="max-w-full break-words text-xs font-semibold text-stone-600">
+          {role
+            ? role[0] + role.slice(1).toLowerCase()
+            : 'Synchronising'}
         </span>
       </div>
 
@@ -601,34 +746,67 @@ export function AuctionInsightsPanel({
           Loading authoritative statistics…
         </p>
       ) : (
-        <dl className="mt-4 grid min-w-0 grid-cols-2 gap-2.5">
-          <Metric label="Current bid" presentation={currentBid} className="col-span-2" />
-          <Metric label="Bidders online" presentation={bidderCount} />
-          <Metric label="Spectators online" presentation={spectatorCount} />
-          <Metric label="Unique bidders" presentation={uniqueBidderCount} />
-          <Metric label="Accepted bids" presentation={bidCount} />
-          <Metric
-            label="Bid velocity / min"
-            presentation={{
-              ...velocity,
-              display:
-                velocity.display === '—'
-                  ? velocity.display
-                  : `${velocity.display}/min`,
-            }}
-          />
-          <Metric
-            label="Auction status"
-            presentation={{
-              display: status
-                ? STATUS_LABELS[status] ?? status
-                : '—',
-              exact: '',
-            }}
-          />
-          <div className="col-span-2 min-w-0 border border-stone-200 bg-stone-50 p-3">
+        <dl className="mt-4 min-w-0">
+          <div className="rounded-[var(--radius-md)] bg-[var(--color-green-soft)] p-4 ring-1 ring-inset ring-emerald-200">
+            <dt className="flex items-center gap-2 text-sm font-semibold text-emerald-900">
+              <Gavel size={16} aria-hidden="true" />
+              Current bid
+            </dt>
+            <dd
+              className="mt-2 break-words text-2xl font-bold tracking-tight tabular-nums text-stone-950 [overflow-wrap:anywhere]"
+              title={currentBid.exact || undefined}
+            >
+              {currentBid.display}
+            </dd>
+          </div>
+
+          <div className="surface-muted mt-3 grid min-w-0 grid-cols-2 p-1">
+            <Metric
+              label="Bidders online"
+              presentation={bidderCount}
+              icon={<Users size={13} />}
+            />
+            <Metric
+              label="Spectators online"
+              presentation={spectatorCount}
+              icon={<Eye size={13} />}
+            />
+            <Metric
+              label="Unique bidders"
+              presentation={uniqueBidderCount}
+              icon={<Users size={13} />}
+            />
+            <Metric
+              label="Accepted bids"
+              presentation={bidCount}
+              icon={<Gavel size={13} />}
+            />
+            <Metric
+              label="Bid velocity"
+              icon={<Gauge size={13} />}
+              presentation={{
+                ...velocity,
+                display:
+                  velocity.display === '—'
+                    ? velocity.display
+                    : `${velocity.display}/min`,
+              }}
+            />
+            <Metric
+              label="Auction status"
+              icon={<Radio size={13} />}
+              presentation={{
+                display: status
+                  ? STATUS_LABELS[status] ?? status
+                  : '—',
+                exact: '',
+              }}
+            />
+          </div>
+
+          <div className="mt-3 min-w-0 border-t border-stone-200 pt-3">
             <dt className="text-xs text-stone-500">Last accepted bid</dt>
-            <dd className="mt-1.5 break-words text-sm font-semibold text-stone-900">
+            <dd className="mt-1 break-words text-sm font-semibold text-stone-900">
               {formatLastBidTime(stats?.lastBidAt, stats?.bidCount)}
             </dd>
           </div>

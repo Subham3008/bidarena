@@ -88,7 +88,7 @@ export function ConfirmDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 grid place-items-center bg-stone-950/55 p-4"
+      className="fixed inset-0 z-50 grid place-items-center bg-stone-950/60 p-4"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget && !isConfirming) {
           onCancel()
@@ -101,23 +101,23 @@ export function ConfirmDialog({
         aria-modal="true"
         aria-labelledby="confirmation-title"
         aria-describedby="confirmation-description"
-        className="w-full max-w-md border border-stone-200 bg-white p-5 shadow-xl sm:p-6"
+        className="surface-elevated w-full max-w-md p-5 sm:p-6"
       >
         <div className="flex items-start justify-between gap-4">
-          <span className="grid h-10 w-10 shrink-0 place-items-center bg-red-50 text-red-700">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-red-50 text-red-700">
             <AlertTriangle size={20} aria-hidden="true" />
           </span>
           <button
             type="button"
             onClick={onCancel}
             disabled={isConfirming}
-            className="-mr-2 -mt-2 rounded-sm p-2 text-stone-500 hover:bg-stone-100 hover:text-stone-900 focus:outline-none focus:ring-2 focus:ring-emerald-700 disabled:cursor-not-allowed"
+            className="-mr-2 -mt-2 grid min-h-11 min-w-11 place-items-center rounded-md text-stone-500 hover:bg-stone-100 hover:text-stone-900 focus:outline-none focus:ring-2 focus:ring-emerald-700 disabled:cursor-not-allowed"
             aria-label="Close confirmation"
           >
             <X size={19} aria-hidden="true" />
           </button>
         </div>
-        <h2 id="confirmation-title" className="mt-4 text-xl font-semibold text-stone-950">
+        <h2 id="confirmation-title" className="mt-4 text-2xl font-semibold tracking-tight text-stone-950">
           {title}
         </h2>
         <p id="confirmation-description" className="mt-2 text-sm leading-6 text-stone-600">
@@ -139,7 +139,7 @@ export function ConfirmDialog({
             type="button"
             onClick={onCancel}
             disabled={isConfirming}
-            className="rounded-sm border border-stone-300 px-4 py-2.5 text-sm font-medium text-stone-800 hover:border-stone-400 focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:ring-offset-2 disabled:cursor-not-allowed disabled:text-stone-400"
+            className="btn-secondary"
           >
             Cancel
           </button>
@@ -147,7 +147,7 @@ export function ConfirmDialog({
             type="button"
             onClick={onConfirm}
             disabled={isConfirming}
-            className="rounded-sm bg-red-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-700 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-stone-400"
+            className="btn-danger"
           >
             {isConfirming ? 'Deleting…' : confirmLabel}
           </button>
