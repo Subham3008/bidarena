@@ -4,6 +4,7 @@ import mongoose from 'mongoose'
 import app from './app.js'
 import { connectDatabase } from './config/database.js'
 import { env } from './config/env.js'
+import Payment from './models/payment.model.js'
 import { recoverAuctionLifecycle } from './services/auction-lifecycle.service.js'
 import { createAuctionTimerManager } from './services/auction-timer-manager.js'
 import {
@@ -13,6 +14,7 @@ import {
 
 const httpServer = createServer(app)
 const io = createAuctionSocketServer(httpServer)
+app.set('auctionSocketServer', io)
 const auctionTimerManager = createAuctionTimerManager(io, {
   onLifecycleStateChanged: (auctionId) =>
     publishAuctionRealtime(io, auctionId),
@@ -23,6 +25,7 @@ async function startServer() {
   try {
     // Accept traffic only after MongoDB is ready so startup never serves partial functionality.
     await connectDatabase()
+    await Payment.init()
     await recoverAuctionLifecycle()
     await auctionTimerManager.schedulePersistedAuctions()
 

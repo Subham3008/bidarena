@@ -7,6 +7,7 @@ import { corsOptions } from './config/cors.js'
 import { errorHandler } from './middleware/error.middleware.js'
 import auctionRouter from './routes/auction.routes.js'
 import authRouter from './routes/auth.routes.js'
+import paymentRouter from './routes/payment.routes.js'
 import uploadRouter from './routes/upload.routes.js'
 
 const app = express()
@@ -38,6 +39,7 @@ app.get('/ready', (_request, response) => {
 
 app.use('/api/auth', authRouter)
 app.use('/api/auctions', auctionRouter)
+app.use('/api/payments', paymentRouter)
 app.use('/api/uploads', uploadRouter)
 app.use(errorHandler)
 
