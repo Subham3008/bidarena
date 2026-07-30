@@ -7,6 +7,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 
 import Auction from '../models/auction.model.js'
 import Bid from '../models/bid.model.js'
+import ChatMessage from '../models/chat-message.model.js'
 import Timeline from '../models/timeline.model.js'
 import { User } from '../models/user.model.js'
 import { createAuctionSocketServer } from '../sockets/auction-rooms.js'
@@ -21,11 +22,13 @@ describe('Socket.io auction rooms', () => {
   let io
   let serverUrl
   let clients = []
+  let userNumber = 0
 
   beforeAll(async () => {
     process.env.JWT_ACCESS_SECRET = 'test-secret-that-is-long-enough'
     mongoServer = await MongoMemoryServer.create()
     await mongoose.connect(mongoServer.getUri())
+    await ChatMessage.init()
 
     httpServer = createServer()
     io = createAuctionSocketServer(httpServer)
@@ -43,6 +46,7 @@ describe('Socket.io auction rooms', () => {
     await Promise.all([
       Auction.deleteMany({}),
       Bid.deleteMany({}),
+      ChatMessage.deleteMany({}),
       Timeline.deleteMany({}),
       User.deleteMany({}),
     ])
@@ -90,6 +94,31 @@ describe('Socket.io auction rooms', () => {
     return new Promise((resolve) => client.emit(event, payload, resolve))
   }
 
+  function waitForEvent(client, eventName, predicate = () => true) {
+    return new Promise((resolve) => {
+      const listener = (payload) => {
+        if (!predicate(payload)) {
+          return
+        }
+
+        client.off(eventName, listener)
+        resolve(payload)
+      }
+
+      client.on(eventName, listener)
+    })
+  }
+
+  async function createUser(displayName, overrides = {}) {
+    userNumber += 1
+    return User.create({
+      displayName,
+      email: `realtime-user-${userNumber}@example.com`,
+      passwordHash: 'stored-password-hash',
+      ...overrides,
+    })
+  }
+
   function authenticatedOptions(user) {
     const token = createSessionToken(user.id)
 
@@ -104,6 +133,10 @@ describe('Socket.io auction rooms', () => {
     return new Promise((resolve) => {
       client.once('presence_updated', resolve)
     })
+  }
+
+  function joinAuction(client, auctionId, mode) {
+    return emitWithAck(client, 'join_auction', { auctionId, mode })
   }
 
   it('sends an authoritative snapshot to a spectator', async () => {
@@ -164,6 +197,214 @@ describe('Socket.io auction rooms', () => {
       success: false,
       message: 'Authentication required for BIDDER mode',
     })
+  })
+
+  it('persists and broadcasts a valid message from an authenticated joined bidder', async () => {
+    const sender = await createUser('Chat Sender', {
+      avatar: 'https://example.com/chat-sender.png',
+    })
+    const auction = await createAuction()
+    const client = await connectClient(authenticatedOptions(sender))
+    await joinAuction(client, auction.id, 'BIDDER')
+    const messagePromise = waitForEvent(
+      client,
+      'chat_message',
+      (event) => event.auctionId === auction.id,
+    )
+
+    const acknowledgement = await emitWithAck(
+      client,
+      'send_chat_message',
+      {
+        auctionId: auction.id,
+        text: '  Is pickup available?  ',
+        clientMessageId: 'chat-valid-1',
+      },
+    )
+    const event = await messagePromise
+    const storedMessage = await ChatMessage.findOne({
+      auction: auction.id,
+    })
+    const historyPromise = waitForEvent(
+      client,
+      'chat_history',
+      (history) => history.auctionId === auction.id,
+    )
+    const historyAck = await emitWithAck(
+      client,
+      'request_chat_history',
+      { auctionId: auction.id },
+    )
+    const history = await historyPromise
+
+    expect(acknowledgement.success).toBe(true)
+    expect(event.chatMessage).toMatchObject({
+      auctionId: auction.id,
+      text: 'Is pickup available?',
+      clientMessageId: 'chat-valid-1',
+      sender: {
+        id: sender.id,
+        name: 'Chat Sender',
+        avatarUrl: 'https://example.com/chat-sender.png',
+      },
+    })
+    expect(event.chatMessage.sender).toEqual({
+      id: sender.id,
+      name: 'Chat Sender',
+      avatarUrl: 'https://example.com/chat-sender.png',
+    })
+    expect(storedMessage.text).toBe('Is pickup available?')
+    expect(historyAck).toEqual({ success: true, data: {} })
+    expect(history.messages).toEqual([event.chatMessage])
+  })
+
+  it('keeps anonymous spectators read-only while allowing them to receive chat', async () => {
+    const sender = await createUser('Readable Chat Sender')
+    const auction = await createAuction()
+    const [senderClient, anonymousClient] = await Promise.all([
+      connectClient(authenticatedOptions(sender)),
+      connectClient(),
+    ])
+    await Promise.all([
+      joinAuction(senderClient, auction.id, 'BIDDER'),
+      joinAuction(anonymousClient, auction.id, 'SPECTATOR'),
+    ])
+    let senderReceivedRejection = false
+    senderClient.on('chat_message_rejected', () => {
+      senderReceivedRejection = true
+    })
+    const rejectionPromise = waitForEvent(
+      anonymousClient,
+      'chat_message_rejected',
+    )
+
+    const anonymousAck = await emitWithAck(
+      anonymousClient,
+      'send_chat_message',
+      {
+        auctionId: auction.id,
+        text: 'Anonymous message',
+        clientMessageId: 'anonymous-chat-1',
+      },
+    )
+    const rejection = await rejectionPromise
+    const receivedMessagePromise = waitForEvent(
+      anonymousClient,
+      'chat_message',
+      (event) => event.auctionId === auction.id,
+    )
+    const senderAck = await emitWithAck(
+      senderClient,
+      'send_chat_message',
+      {
+        auctionId: auction.id,
+        text: 'Visible to spectators',
+        clientMessageId: 'visible-chat-1',
+      },
+    )
+    const receivedMessage = await receivedMessagePromise
+
+    expect(anonymousAck).toEqual({
+      success: false,
+      message: 'Authentication required to send chat',
+    })
+    expect(rejection).toEqual(anonymousAck)
+    expect(senderAck.success).toBe(true)
+    expect(receivedMessage.chatMessage.text).toBe('Visible to spectators')
+    expect(senderReceivedRejection).toBe(false)
+  })
+
+  it('keeps chat messages isolated to their auction room', async () => {
+    const sender = await createUser('Isolated Chat Sender')
+    const [auctionA, auctionB] = await Promise.all([
+      createAuction({ title: 'Chat Auction A' }),
+      createAuction({ title: 'Chat Auction B' }),
+    ])
+    const [clientA, clientB] = await Promise.all([
+      connectClient(authenticatedOptions(sender)),
+      connectClient(),
+    ])
+    await Promise.all([
+      joinAuction(clientA, auctionA.id, 'BIDDER'),
+      joinAuction(clientB, auctionB.id, 'SPECTATOR'),
+    ])
+    let crossedRooms = false
+    clientB.on('chat_message', (event) => {
+      crossedRooms ||= event.auctionId === auctionA.id
+    })
+    const messagePromise = waitForEvent(
+      clientA,
+      'chat_message',
+      (event) => event.auctionId === auctionA.id,
+    )
+
+    await emitWithAck(clientA, 'send_chat_message', {
+      auctionId: auctionA.id,
+      text: 'Auction A only',
+      clientMessageId: 'isolated-chat-1',
+    })
+    await messagePromise
+    await new Promise((resolve) => setTimeout(resolve, 25))
+
+    expect(crossedRooms).toBe(false)
+  })
+
+  it('does not persist or broadcast a duplicate clientMessageId twice', async () => {
+    const sender = await createUser('Idempotent Chat Sender')
+    const auction = await createAuction()
+    const client = await connectClient(authenticatedOptions(sender))
+    await joinAuction(client, auction.id, 'BIDDER')
+    let broadcastCount = 0
+    client.on('chat_message', () => {
+      broadcastCount += 1
+    })
+
+    const first = await emitWithAck(client, 'send_chat_message', {
+      auctionId: auction.id,
+      text: 'Send once',
+      clientMessageId: 'duplicate-chat-1',
+    })
+    const duplicate = await emitWithAck(client, 'send_chat_message', {
+      auctionId: auction.id,
+      text: 'Do not send twice',
+      clientMessageId: 'duplicate-chat-1',
+    })
+    await new Promise((resolve) => setTimeout(resolve, 25))
+
+    expect(first.success).toBe(true)
+    expect(duplicate).toEqual({
+      success: false,
+      message: 'Duplicate chat message',
+    })
+    expect(await ChatMessage.countDocuments({ sender: sender.id })).toBe(1)
+    expect(broadcastCount).toBe(1)
+  })
+
+  it('rate limits a verified user after five messages in ten seconds', async () => {
+    const sender = await createUser('Rate Limited Sender')
+    const auction = await createAuction()
+    const client = await connectClient(authenticatedOptions(sender))
+    await joinAuction(client, auction.id, 'BIDDER')
+    const acknowledgements = []
+
+    for (let index = 1; index <= 6; index += 1) {
+      acknowledgements.push(
+        await emitWithAck(client, 'send_chat_message', {
+          auctionId: auction.id,
+          text: `Rate message ${index}`,
+          clientMessageId: `rate-chat-${index}`,
+        }),
+      )
+    }
+
+    expect(
+      acknowledgements.slice(0, 5).every((result) => result.success),
+    ).toBe(true)
+    expect(acknowledgements[5]).toEqual({
+      success: false,
+      message: 'Chat rate limit exceeded; try again shortly',
+    })
+    expect(await ChatMessage.countDocuments({ sender: sender.id })).toBe(5)
   })
 
   it('isolates events between two auction rooms', async () => {
@@ -318,6 +559,132 @@ describe('Socket.io auction rooms', () => {
       auctionId: auction.id,
     })
     expect((await updatePromise).spectatorCount).toBe(1)
+  })
+
+  it('updates unique participant statistics on join and per-socket leave', async () => {
+    const bidder = await createUser('Statistics Bidder')
+    const spectator = await createUser('Statistics Spectator')
+    const auction = await createAuction()
+    const [
+      observer,
+      firstTab,
+      secondTab,
+      firstSpectatorTab,
+      secondSpectatorTab,
+    ] = await Promise.all([
+      connectClient(),
+      connectClient(authenticatedOptions(bidder)),
+      connectClient(authenticatedOptions(bidder)),
+      connectClient(authenticatedOptions(spectator)),
+      connectClient(authenticatedOptions(spectator)),
+    ])
+    await joinAuction(observer, auction.id, 'SPECTATOR')
+
+    let statsPromise = waitForEvent(
+      observer,
+      'auction_stats_updated',
+      (event) =>
+        event.auctionId === auction.id && event.stats.bidderCount === 1,
+    )
+    await joinAuction(firstTab, auction.id, 'BIDDER')
+    expect((await statsPromise).stats).toMatchObject({
+      bidderCount: 1,
+      spectatorCount: 1,
+      bidCount: 0,
+    })
+
+    statsPromise = waitForEvent(
+      observer,
+      'auction_stats_updated',
+      (event) => event.auctionId === auction.id,
+    )
+    await joinAuction(secondTab, auction.id, 'BIDDER')
+    expect((await statsPromise).stats.bidderCount).toBe(1)
+
+    statsPromise = waitForEvent(
+      observer,
+      'auction_stats_updated',
+      (event) => event.auctionId === auction.id,
+    )
+    firstTab.disconnect()
+    expect((await statsPromise).stats.bidderCount).toBe(1)
+
+    statsPromise = waitForEvent(
+      observer,
+      'auction_stats_updated',
+      (event) => event.auctionId === auction.id,
+    )
+    await emitWithAck(secondTab, 'leave_auction', {
+      auctionId: auction.id,
+    })
+    expect((await statsPromise).stats).toMatchObject({
+      bidderCount: 0,
+      spectatorCount: 1,
+    })
+
+    statsPromise = waitForEvent(
+      observer,
+      'auction_stats_updated',
+      (event) => event.auctionId === auction.id,
+    )
+    await joinAuction(firstSpectatorTab, auction.id, 'SPECTATOR')
+    expect((await statsPromise).stats.spectatorCount).toBe(2)
+
+    statsPromise = waitForEvent(
+      observer,
+      'auction_stats_updated',
+      (event) => event.auctionId === auction.id,
+    )
+    await joinAuction(secondSpectatorTab, auction.id, 'SPECTATOR')
+    expect((await statsPromise).stats.spectatorCount).toBe(2)
+
+    statsPromise = waitForEvent(
+      observer,
+      'auction_stats_updated',
+      (event) => event.auctionId === auction.id,
+    )
+    await emitWithAck(firstSpectatorTab, 'leave_auction', {
+      auctionId: auction.id,
+    })
+    expect((await statsPromise).stats.spectatorCount).toBe(2)
+
+    statsPromise = waitForEvent(
+      observer,
+      'auction_stats_updated',
+      (event) => event.auctionId === auction.id,
+    )
+    await emitWithAck(secondSpectatorTab, 'leave_auction', {
+      auctionId: auction.id,
+    })
+    expect((await statsPromise).stats.spectatorCount).toBe(1)
+
+    const requestedStatsPromise = waitForEvent(
+      observer,
+      'auction_stats_updated',
+      (event) => event.auctionId === auction.id,
+    )
+    const requestedHeatPromise = waitForEvent(
+      observer,
+      'auction_heat_updated',
+      (event) => event.auctionId === auction.id,
+    )
+    const requestAck = await emitWithAck(
+      observer,
+      'request_auction_stats',
+      { auctionId: auction.id },
+    )
+    const [requestedStats, requestedHeat] = await Promise.all([
+      requestedStatsPromise,
+      requestedHeatPromise,
+    ])
+
+    expect(requestAck).toEqual({ success: true, data: {} })
+    expect(requestedStats.stats.bidderCount).toBe(0)
+    expect(requestedHeat).toMatchObject({
+      heat: 'COLD',
+      recentBidCount: 0,
+      windowSeconds: 60,
+    })
   })
 
   it('restores enriched persisted winner and bid state after reconnect', async () => {

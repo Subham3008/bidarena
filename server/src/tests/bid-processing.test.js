@@ -107,6 +107,21 @@ describe('deterministic live bid processing', () => {
     return new Promise((resolve) => client.emit(event, payload, resolve))
   }
 
+  function waitForEvent(client, eventName, predicate = () => true) {
+    return new Promise((resolve) => {
+      const listener = (payload) => {
+        if (!predicate(payload)) {
+          return
+        }
+
+        client.off(eventName, listener)
+        resolve(payload)
+      }
+
+      client.on(eventName, listener)
+    })
+  }
+
   async function joinBidder(client, auctionId) {
     return emitWithAck(client, 'join_auction', {
       auctionId,
@@ -197,7 +212,60 @@ describe('deterministic live bid processing', () => {
     expect(timelineEvent.metadata.bidSequence).toBe(1)
   })
 
-  it('does not broadcast an accepted bid into another auction room', async () => {
+  it('updates authoritative statistics and heat after an accepted bid', async () => {
+    const seller = await createUser('Statistics Seller')
+    const bidder = await createUser('Statistics Bidder')
+    const auction = await createAuction(seller)
+    const client = await connectUser(bidder)
+    await joinBidder(client, auction.id)
+    const statsPromise = waitForEvent(
+      client,
+      'auction_stats_updated',
+      (event) =>
+        event.auctionId === auction.id && event.stats.bidCount === 1,
+    )
+    const heatPromise = waitForEvent(
+      client,
+      'auction_heat_updated',
+      (event) =>
+        event.auctionId === auction.id && event.recentBidCount === 1,
+    )
+
+    const acknowledgement = await emitWithAck(client, 'place_bid', {
+      auctionId: auction.id,
+      amount: 1100,
+      clientBidId: 'statistics-bid-1',
+    })
+    const [statsEvent, heatEvent] = await Promise.all([
+      statsPromise,
+      heatPromise,
+    ])
+
+    expect(acknowledgement.success).toBe(true)
+    expect(statsEvent).toMatchObject({
+      auctionId: auction.id,
+      stats: {
+        bidderCount: 1,
+        spectatorCount: 0,
+        bidCount: 1,
+        uniqueBidderCount: 1,
+        currentBid: 1100,
+        bidVelocityPerMinute: 1,
+        lastBidAt: expect.any(String),
+        status: 'ACTIVE',
+      },
+      serverTime: expect.any(Number),
+    })
+    expect(heatEvent).toMatchObject({
+      auctionId: auction.id,
+      heat: 'COLD',
+      recentBidCount: 1,
+      windowSeconds: 60,
+      serverTime: expect.any(Number),
+    })
+  })
+
+  it('keeps accepted bid statistics and heat isolated to their auction room', async () => {
     const [sellerA, sellerB, bidder, observer] = await Promise.all([
       createUser('Seller Room A'),
       createUser('Seller Room B'),
@@ -217,23 +285,45 @@ describe('deterministic live bid processing', () => {
       joinBidder(observerClient, auctionB.id),
     ])
     let crossedRooms = false
+    let crossedStats = false
+    let crossedHeat = false
     observerClient.on('auction_state_updated', (update) => {
       crossedRooms ||= update.auctionId === auctionA.id
+    })
+    observerClient.on('auction_stats_updated', (event) => {
+      crossedStats ||= event.auctionId === auctionA.id
+    })
+    observerClient.on('auction_heat_updated', (event) => {
+      crossedHeat ||= event.auctionId === auctionA.id
     })
     const acceptedUpdate = new Promise((resolve) => {
       bidderClient.once('auction_state_updated', resolve)
     })
+    const statsPromise = waitForEvent(
+      bidderClient,
+      'auction_stats_updated',
+      (event) =>
+        event.auctionId === auctionA.id && event.stats.bidCount === 1,
+    )
+    const heatPromise = waitForEvent(
+      bidderClient,
+      'auction_heat_updated',
+      (event) =>
+        event.auctionId === auctionA.id && event.recentBidCount === 1,
+    )
 
     const acknowledgement = await emitWithAck(bidderClient, 'place_bid', {
       auctionId: auctionA.id,
       amount: 1100,
       clientBidId: 'isolated-bid-1',
     })
-    await acceptedUpdate
+    await Promise.all([acceptedUpdate, statsPromise, heatPromise])
     await new Promise((resolve) => setTimeout(resolve, 25))
 
     expect(acknowledgement.success).toBe(true)
     expect(crossedRooms).toBe(false)
+    expect(crossedStats).toBe(false)
+    expect(crossedHeat).toBe(false)
   })
 
   it('includes the safe bidder identity in an accepted bid payload', async () => {

@@ -3,7 +3,8 @@
 > **Contract status:** Living contract.
 > **Implemented now:** optional cookie authentication, auction rooms,
 > authoritative snapshots, in-memory presence, deterministic bidding, and
-> authoritative lifecycle timers. Chat, Redis, and payment events remain planned.
+> authoritative lifecycle timers, chat, live statistics, and auction heat.
+> Redis and payment events remain planned.
 
 The Domain A auction-room client consumes the implemented snapshot and presence
 events. Its bid control waits for a `place_bid` acknowledgement and never
@@ -116,7 +117,7 @@ Rules:
 
 ## 5. Client-to-server commands
 
-The room/snapshot commands and `place_bid` are implemented. Chat remains planned.
+The room, snapshot, bidding, chat, statistics, and heat commands are implemented.
 
 | Command | Authentication | Purpose | Acknowledgement data |
 |---|---|---|---|
@@ -124,7 +125,9 @@ The room/snapshot commands and `place_bid` are implemented. Chat remains planned
 | `leave_auction` | Same socket that joined | Leave an auction room. | `{}` |
 | `request_auction_snapshot` | Joined socket | Emit authoritative room state after a gap or suspected staleness. | `{}` |
 | `place_bid` | Joined verified bidder | Queue and atomically persist one bid intent. | `{ bid, latestBid, auction, timelineEvent }` |
-| `send_chat_message` | Joined/authorized socket | Submit a room-isolated chat message. | Persisted/accepted chat message. |
+| `send_chat_message` | Joined verified seller or bidder | Persist one room-isolated chat message. | `{ chatMessage }` |
+| `request_chat_history` | Joined socket | Emit the latest 50 persisted messages. | `{}` |
+| `request_auction_stats` | Joined socket | Emit current authoritative statistics and heat. | `{}` |
 
 ### 5.1 `join_auction`
 
@@ -275,21 +278,45 @@ Request:
 ```json
 {
   "auctionId": "auction_opaque_id",
-  "message": "Is local pickup available?"
+  "text": "Is local pickup available?",
+  "clientMessageId": "client_message_opaque_id"
 }
 ```
 
-Successful acknowledgement data contains the accepted `chatMessage` resource.
-Message length, rate limits, persistence/retention, moderation, and retry
-idempotency are unresolved. Until idempotency is defined, clients must not
-blindly retry a timed-out chat send. A chat error never fails a bid command or
-changes auction state.
+The verified socket identity is the sender; client identity and role fields are
+ignored. Text is trimmed, limited to 300 characters, stored as plain text, and
+HTML-sensitive characters are escaped in public payloads. Each verified user
+may send at most five valid messages in ten seconds. The unique
+`sender + clientMessageId` constraint makes retry duplicates reject without a
+second persistence or broadcast. A chat error never enters the bid queue.
+
+### 5.6 `request_chat_history`
+
+```json
+{
+  "auctionId": "auction_opaque_id"
+}
+```
+
+Any joined participant, including an anonymous spectator, may request history.
+Success emits `chat_history` only to that socket.
+
+### 5.7 `request_auction_stats`
+
+```json
+{
+  "auctionId": "auction_opaque_id"
+}
+```
+
+Any joined participant may request an authoritative `auction_stats_updated`
+and `auction_heat_updated` refresh. These request-driven events are emitted only
+to the requesting socket.
 
 ## 6. Server-to-client events
 
-`auction_snapshot`, `presence_updated`, `auction_state_updated`, `bid_rejected`,
-`auction_started`, `timer_sync`, and `auction_completed` are implemented. Other
-events below remain planned.
+Room, bidding, lifecycle, chat, statistics, and heat events named below are
+implemented. `timeline_event_created` and payment events remain planned.
 
 | Event | Audience | Purpose |
 |---|---|---|
@@ -301,8 +328,11 @@ events below remain planned.
 | `auction_completed` | Auction room | Publish the one-time persisted completion and winner result. |
 | `presence_updated` | Auction room | Publish active bidder and spectator counts. |
 | `timeline_event_created` | Auction room | Publish a newly persisted public timeline entry. |
-| `auction_statistics_updated` | Auction room | Publish server-derived live statistics/heat after its schema is frozen. |
-| `chat_message_created` | Auction room | Publish an accepted room-isolated chat message. |
+| `auction_stats_updated` | Auction room or requesting socket | Publish server-derived live statistics. |
+| `auction_heat_updated` | Auction room or requesting socket | Publish recent accepted-bid heat. |
+| `chat_message` | Auction room | Publish one persisted room-isolated message. |
+| `chat_history` | Requesting/joining socket | Publish at most 50 persisted messages. |
+| `chat_message_rejected` | Requesting socket only | Report a private chat rejection. |
 | `payment_status_updated` | Auction room with public-safe fields | Publish backend-verified payment state. |
 
 `timer_sync` is emitted only while the auction is authoritatively `ACTIVE`.
@@ -365,6 +395,9 @@ Because `currentUserRole` may differ per socket, a full snapshot containing it
 is sent to one socket rather than broadcast unchanged to the whole room.
 MongoDB references are populated with only `_id`, `displayName`, and `avatar`;
 the public payload maps them to `id`, `name`, and `avatarUrl`.
+Join and snapshot-resynchronization also emit current `chat_history`,
+`auction_stats_updated`, and `auction_heat_updated` events without changing the
+existing snapshot object.
 
 ### 6.2 `auction_state_updated`
 
@@ -497,31 +530,94 @@ tracked but is not included in these public counts.
 `BID_ACCEPTED` is persisted for every accepted bid. Other timeline types and
 public payload schemas remain separately defined.
 
-### 6.7 `auction_statistics_updated`
+### 6.7 `auction_stats_updated`
 
-The SRS requires live statistics and auction heat but does not define formulas or
-payload fields. The event name is reserved; no representative numeric payload is
-invented here. Until the schema is frozen, the client obtains only the counts
-and bid data explicitly present in snapshots and bid events.
+```json
+{
+  "auctionId": "auction_opaque_id",
+  "stats": {
+    "bidderCount": 2,
+    "spectatorCount": 1,
+    "bidCount": 15,
+    "uniqueBidderCount": 2,
+    "currentBid": 20500,
+    "bidVelocityPerMinute": 4,
+    "lastBidAt": "2026-08-01T12:11:00.000Z",
+    "status": "ACTIVE"
+  },
+  "serverTime": 1785595860000
+}
+```
 
-### 6.8 `chat_message_created`
+Presence counts come from unique in-memory room identities. Bid count, current
+bid, status, unique bidder count, velocity, and last bid time come from
+persisted auction and accepted-bid data. Velocity is the number of accepted bids
+in the latest 60 seconds.
+
+### 6.8 `auction_heat_updated`
+
+```json
+{
+  "auctionId": "auction_opaque_id",
+  "heat": "WARM",
+  "recentBidCount": 3,
+  "windowSeconds": 60,
+  "serverTime": 1785595860000
+}
+```
+
+Heat uses only persisted accepted bids in the latest 60 seconds: zero or one is
+`COLD`, two through four is `WARM`, and five or more is `HOT`.
+
+### 6.9 `chat_message`
 
 ```json
 {
   "auctionId": "auction_opaque_id",
   "chatMessage": {
     "id": "chat_opaque_id",
+    "auctionId": "auction_opaque_id",
     "sender": {
       "id": "user_opaque_id",
-      "displayName": "Visible participant name"
+      "name": "Visible participant name",
+      "avatarUrl": null
     },
-    "message": "Is local pickup available?",
+    "text": "Is local pickup available?",
+    "clientMessageId": "client_message_opaque_id",
     "createdAt": "2026-08-01T12:12:00.000Z"
-  }
+  },
+  "serverTime": 1785595920000
 }
 ```
 
-### 6.9 `payment_status_updated`
+The sender contains only public identity fields. The room event is emitted only
+after MongoDB persistence succeeds.
+
+### 6.10 `chat_history`
+
+```json
+{
+  "auctionId": "auction_opaque_id",
+  "messages": [],
+  "serverTime": 1785595920000
+}
+```
+
+`messages` contains the latest 50 persisted messages in oldest-to-newest order.
+
+### 6.11 `chat_message_rejected`
+
+```json
+{
+  "success": false,
+  "message": "Chat rate limit exceeded; try again shortly"
+}
+```
+
+This event and its matching negative acknowledgement are sent only to the
+requesting socket.
+
+### 6.12 `payment_status_updated`
 
 ```json
 {
@@ -535,7 +631,7 @@ This event is emitted only after backend verification and persistence. Provider
 order IDs, payment IDs, signatures, and secrets are not included in the room
 broadcast.
 
-### 6.10 `timer_sync`
+### 6.13 `timer_sync`
 
 ```json
 {
@@ -627,8 +723,8 @@ Rules:
    alone.
 5. A bid sequence gap, impossible status transition, or uncertain command
    timeout triggers snapshot recovery.
-6. Reconnection does not replay chat or other durable history unless the frozen
-   snapshot/history contract explicitly includes it.
+6. Reconnection rejoins and receives `chat_history`, current statistics, and
+   current heat alongside the unchanged authoritative snapshot.
 7. Server restart recovery reads MongoDB, completes expired auctions safely,
    restores active timers/cache where appropriate, and still returns the same
    snapshot contract.
@@ -661,12 +757,11 @@ The available SRS does not settle these points:
 2. Public bidder/winner identity masking.
 3. A unified non-bid `stateVersion` and replay strategy.
 4. Client acknowledgement timeouts, retry backoff, and server rate limits.
-5. Chat limits, history retention, moderation, and post-completion behavior.
+5. Chat moderation, long-term retention, and post-completion behavior.
 6. Presence disconnect grace periods.
 7. Timeline event registry and public payload schema.
-8. Statistics and auction-heat formulas and payload schema.
-9. Redis cache failure behavior during an otherwise persisted bid.
-10. Payment retry and reconciliation events.
+8. Redis cache failure behavior during an otherwise persisted bid.
+9. Payment retry and reconciliation events.
 
 Both domains must resolve these in the shared contract before implementing
 dependent client and server behavior. Neither side may silently choose a
