@@ -1085,6 +1085,7 @@ export function AuctionDetailsPage() {
                   role={role}
                   isAuthenticated={Boolean(user?.id)}
                   auctionStatus={auction.status}
+                  isChatReadOnly={room.isChatReadOnly}
                   currentUserId={user?.id}
                   sellerId={identityId(auction.seller)}
                   isSelected={
