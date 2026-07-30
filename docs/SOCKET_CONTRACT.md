@@ -475,9 +475,10 @@ winning amount, and bid-count mirrors for compatibility.
 ```
 
 Presence is live operational state, not durable auction history. Disconnect
-cleanup removes the socket from every joined auction. Presence tracks bidder,
-spectator, and seller membership per socket; the public counts include bidders
-and spectators.
+cleanup removes only that socket from every joined auction. Bidder counts use
+unique authenticated user IDs across tabs; authenticated spectators count by
+identity and anonymous spectators count by connection. Seller presence is also
+tracked but is not included in these public counts.
 
 ### 6.6 `timeline_event_created`
 

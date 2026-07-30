@@ -114,9 +114,77 @@ function roomName(auctionId) {
 function createPresenceStore() {
   const auctions = new Map()
 
-  function set(auctionId, socketId, role) {
-    const members = auctions.get(auctionId) ?? new Map()
-    members.set(socketId, role)
+  function createAuctionPresence() {
+    return {
+      bidders: new Map(),
+      sellers: new Map(),
+      spectatorUsers: new Map(),
+      anonymousSpectators: new Set(),
+      sockets: new Map(),
+    }
+  }
+
+  function addUserSocket(users, userId, socketId) {
+    const socketIds = users.get(userId) ?? new Set()
+    socketIds.add(socketId)
+    users.set(userId, socketIds)
+  }
+
+  function removeUserSocket(users, userId, socketId) {
+    const socketIds = users.get(userId)
+
+    if (!socketIds) {
+      return
+    }
+
+    socketIds.delete(socketId)
+
+    if (socketIds.size === 0) {
+      users.delete(userId)
+    }
+  }
+
+  function removeSocket(members, socketId) {
+    const membership = members.sockets.get(socketId)
+
+    if (!membership) {
+      return
+    }
+
+    if (membership.role === 'BIDDER') {
+      removeUserSocket(members.bidders, membership.userId, socketId)
+    } else if (membership.role === 'SELLER') {
+      removeUserSocket(members.sellers, membership.userId, socketId)
+    } else if (membership.userId) {
+      removeUserSocket(
+        members.spectatorUsers,
+        membership.userId,
+        socketId,
+      )
+    } else {
+      members.anonymousSpectators.delete(socketId)
+    }
+
+    members.sockets.delete(socketId)
+  }
+
+  function set(auctionId, socketId, role, userId) {
+    const members =
+      auctions.get(auctionId) ?? createAuctionPresence()
+
+    removeSocket(members, socketId)
+
+    if (role === 'BIDDER') {
+      addUserSocket(members.bidders, userId, socketId)
+    } else if (role === 'SELLER') {
+      addUserSocket(members.sellers, userId, socketId)
+    } else if (userId) {
+      addUserSocket(members.spectatorUsers, userId, socketId)
+    } else {
+      members.anonymousSpectators.add(socketId)
+    }
+
+    members.sockets.set(socketId, { role, userId })
     auctions.set(auctionId, members)
   }
 
@@ -127,24 +195,27 @@ function createPresenceStore() {
       return
     }
 
-    members.delete(socketId)
+    // Removing one tab keeps the authenticated identity present through its other sockets.
+    removeSocket(members, socketId)
 
-    if (members.size === 0) {
+    if (members.sockets.size === 0) {
       auctions.delete(auctionId)
     }
   }
 
   function counts(auctionId) {
-    const roles = auctions.get(auctionId)?.values() ?? []
-    let activeBidderCount = 0
-    let spectatorCount = 0
+    const members = auctions.get(auctionId)
 
-    for (const role of roles) {
-      activeBidderCount += role === 'BIDDER' ? 1 : 0
-      spectatorCount += role === 'SPECTATOR' ? 1 : 0
+    if (!members) {
+      return { activeBidderCount: 0, spectatorCount: 0 }
     }
 
-    return { activeBidderCount, spectatorCount }
+    return {
+      activeBidderCount: members.bidders.size,
+      spectatorCount:
+        members.spectatorUsers.size +
+        members.anonymousSpectators.size,
+    }
   }
 
   return { counts, remove, set }
@@ -207,7 +278,12 @@ function registerRoomHandlers(io, socket, presenceStore, bidQueue) {
       const role = decideRole(socket, data.auction, payload.mode)
       await socket.join(roomName(auctionId))
       socket.data.auctionRoles.set(auctionId, role)
-      presenceStore.set(auctionId, socket.id, role)
+      presenceStore.set(
+        auctionId,
+        socket.id,
+        role,
+        socket.data.user?.id ?? null,
+      )
 
       socket.emit(
         'auction_snapshot',
