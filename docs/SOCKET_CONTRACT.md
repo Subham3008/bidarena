@@ -25,9 +25,11 @@ timer expiry, winner, or payment status.
   untrusted and never establishes identity.
 - The verified principal is attached to `socket.data.user`; anonymous sockets
   may join only as spectators.
-- The deployment path, allowed origins, and transport fallback policy are still
-  unresolved. Event names and payloads do not depend on those deployment
-  choices.
+- The server uses the default `/socket.io` path and preserves Socket.IO polling
+  plus WebSocket transport fallback.
+- Express and Socket.IO share the credentialed `CLIENT_URLS` origin allowlist.
+- The first deployment runs one backend instance because queues and presence
+  are process-local; proxy-specific TLS/upgrade settings remain operational.
 
 Socket connections remain available for spectators when identity cannot be
 verified. Bidder-mode joins are rejected through the command acknowledgement.
@@ -753,7 +755,7 @@ Rules:
 
 The available SRS does not settle these points:
 
-1. Socket.io deployment path, transports, and proxy settings.
+1. Provider-specific TLS, reverse-proxy, and WebSocket upgrade settings.
 2. Public bidder/winner identity masking.
 3. A unified non-bid `stateVersion` and replay strategy.
 4. Client acknowledgement timeouts, retry backoff, and server rate limits.

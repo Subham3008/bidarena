@@ -3,7 +3,10 @@ import { describe, expect, it } from 'vitest'
 
 import app from '../app.js'
 import { createCorsOriginValidator } from '../config/cors.js'
-import { parseClientUrls } from '../config/env.js'
+import {
+  assertRequiredEnvironment,
+  parseClientUrls,
+} from '../config/env.js'
 
 describe('GET /health', () => {
   it('reports that the server is running', async () => {
@@ -13,6 +16,19 @@ describe('GET /health', () => {
     expect(response.body).toEqual({
       success: true,
       message: 'BidArena server is running',
+    })
+  })
+})
+
+describe('GET /ready', () => {
+  it('reports MongoDB as unavailable while disconnected', async () => {
+    const response = await request(app).get('/ready')
+
+    expect(response.status).toBe(503)
+    expect(response.body).toEqual({
+      success: false,
+      message: 'BidArena server is not ready',
+      database: 'disconnected',
     })
   })
 })
@@ -47,5 +63,44 @@ describe('CORS origin allowlist', () => {
       statusCode: 403,
       code: 'ORIGIN_NOT_ALLOWED',
     })
+    expect(() =>
+      parseClientUrls('https://app.example.com/path'),
+    ).toThrow('valid HTTP(S) origins')
+  })
+})
+
+describe('production environment validation', () => {
+  const validProductionEnvironment = {
+    nodeEnv: 'production',
+    clientUrlsConfigured: true,
+    clientUrls: ['https://app.example.com'],
+    mongodbUri: 'mongodb://localhost:27017/bidarena',
+    jwtAccessSecret: 'x'.repeat(32),
+    accessTokenExpiry: '15m',
+    sessionCookieSameSite: 'lax',
+  }
+
+  it('requires explicit origins and strong core credentials', () => {
+    expect(() =>
+      assertRequiredEnvironment(validProductionEnvironment),
+    ).not.toThrow()
+    expect(() =>
+      assertRequiredEnvironment({
+        ...validProductionEnvironment,
+        clientUrlsConfigured: false,
+      }),
+    ).toThrow('CLIENT_URLS is required in production')
+    expect(() =>
+      assertRequiredEnvironment({
+        ...validProductionEnvironment,
+        jwtAccessSecret: 'short',
+      }),
+    ).toThrow('at least 32 characters')
+    expect(() =>
+      assertRequiredEnvironment({
+        ...validProductionEnvironment,
+        accessTokenExpiry: 'soon',
+      }),
+    ).toThrow('positive duration')
   })
 })

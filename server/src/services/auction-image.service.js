@@ -32,11 +32,22 @@ function hasValidImageSignature(file) {
   return false
 }
 
-function assertCloudinaryConfiguration() {
+function isPlaceholder(value) {
+  return /^(your_|replace_|changeme|example)/i.test(value)
+}
+
+function getCloudinaryConfiguration() {
+  const cloudName = env.cloudinaryCloudName?.trim() ?? ''
+  const apiKey = env.cloudinaryApiKey?.trim() ?? ''
+  const apiSecret = env.cloudinaryApiSecret?.trim() ?? ''
+
   if (
-    !env.cloudinaryCloudName ||
-    !env.cloudinaryApiKey ||
-    !env.cloudinaryApiSecret
+    !cloudName ||
+    !apiKey ||
+    !apiSecret ||
+    isPlaceholder(cloudName) ||
+    isPlaceholder(apiKey) ||
+    isPlaceholder(apiSecret)
   ) {
     throw new AppError(
       503,
@@ -44,6 +55,8 @@ function assertCloudinaryConfiguration() {
       'Image upload is not configured',
     )
   }
+
+  return { cloudName, apiKey, apiSecret }
 }
 
 function uploadBuffer(buffer) {
@@ -85,13 +98,14 @@ export async function uploadAuctionImage(file) {
     )
   }
 
-  assertCloudinaryConfiguration()
+  const { cloudName, apiKey, apiSecret } =
+    getCloudinaryConfiguration()
 
   try {
     cloudinary.config({
-      cloud_name: env.cloudinaryCloudName,
-      api_key: env.cloudinaryApiKey,
-      api_secret: env.cloudinaryApiSecret,
+      cloud_name: cloudName,
+      api_key: apiKey,
+      api_secret: apiSecret,
       secure: true,
     })
 
