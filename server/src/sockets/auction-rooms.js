@@ -1,7 +1,7 @@
 import mongoose from 'mongoose'
 import { Server } from 'socket.io'
 
-import { env } from '../config/env.js'
+import { corsOptions } from '../config/cors.js'
 import { createAuctionBidQueue } from '../engine/auction-bid-queue.js'
 import { User } from '../models/user.model.js'
 import { loadAuctionSnapshotData } from '../services/auction-snapshot.service.js'
@@ -356,10 +356,7 @@ function registerRoomHandlers(io, socket, presenceStore, bidQueue) {
 
 export function createAuctionSocketServer(httpServer) {
   const io = new Server(httpServer, {
-    cors: {
-      origin: env.clientUrl,
-      credentials: true,
-    },
+    cors: corsOptions,
   })
   const presenceStore = createPresenceStore()
   const bidQueue = createAuctionBidQueue()

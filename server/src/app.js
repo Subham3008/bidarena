@@ -3,20 +3,16 @@ import cors from 'cors'
 import express from 'express'
 import mongoose from 'mongoose'
 
-import { env } from './config/env.js'
+import { corsOptions } from './config/cors.js'
 import { errorHandler } from './middleware/error.middleware.js'
 import auctionRouter from './routes/auction.routes.js'
 import authRouter from './routes/auth.routes.js'
+import uploadRouter from './routes/upload.routes.js'
 
 const app = express()
 
 app.disable('x-powered-by')
-app.use(
-  cors({
-    origin: env.clientUrl.replace(/\/+$/, ''),
-    credentials: true,
-  }),
-)
+app.use(cors(corsOptions))
 app.use(express.json())
 app.use(cookieParser())
 
@@ -42,6 +38,7 @@ app.get('/ready', (_request, response) => {
 
 app.use('/api/auth', authRouter)
 app.use('/api/auctions', auctionRouter)
+app.use('/api/uploads', uploadRouter)
 app.use(errorHandler)
 
 export default app

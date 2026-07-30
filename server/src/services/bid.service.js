@@ -1,5 +1,6 @@
 import mongoose from 'mongoose'
 
+import { env } from '../config/env.js'
 import Auction from '../models/auction.model.js'
 import Bid from '../models/bid.model.js'
 import Timeline from '../models/timeline.model.js'
@@ -58,12 +59,20 @@ export async function processBid({
         reject('Seller cannot bid on own auction')
       }
 
-      if (typeof amount !== 'number' || !Number.isFinite(amount)) {
-        reject('Bid amount must be a number')
+      if (typeof amount === 'string' && /e/i.test(amount)) {
+        reject('Exponential bid notation is not allowed')
+      }
+
+      if (!Number.isFinite(amount) || !Number.isSafeInteger(amount)) {
+        reject('Bid amount must be a finite safe integer')
       }
 
       if (amount <= 0) {
         reject('Bid amount must be greater than zero')
+      }
+
+      if (amount > env.maxBidAmount) {
+        reject(`Bid amount cannot exceed ${env.maxBidAmount}`)
       }
 
       if (!normalizedClientBidId) {
@@ -81,6 +90,13 @@ export async function processBid({
       }
 
       const minimumBid = auction.currentBid + auction.minimumIncrement
+
+      if (
+        !Number.isFinite(minimumBid) ||
+        minimumBid > env.maxBidAmount
+      ) {
+        reject('Auction has reached the maximum bid amount')
+      }
 
       if (amount < minimumBid) {
         reject(`Bid must be at least ${minimumBid}`)
