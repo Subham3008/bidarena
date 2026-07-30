@@ -5,9 +5,18 @@ export function createCorsOriginValidator(allowedOrigins) {
   const allowlist = new Set(allowedOrigins.map(normalizeClientOrigin))
 
   return (origin, callback) => {
-    if (!origin || allowlist.has(normalizeClientOrigin(origin))) {
+    if (!origin) {
       callback(null, true)
       return
+    }
+
+    try {
+      if (allowlist.has(normalizeClientOrigin(origin))) {
+        callback(null, true)
+        return
+      }
+    } catch {
+      // Invalid browser origins follow the same public rejection path.
     }
 
     callback(

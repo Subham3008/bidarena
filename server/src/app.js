@@ -1,6 +1,8 @@
+import compression from 'compression'
 import cookieParser from 'cookie-parser'
 import cors from 'cors'
 import express from 'express'
+import helmet from 'helmet'
 import mongoose from 'mongoose'
 
 import { corsOptions } from './config/cors.js'
@@ -13,6 +15,8 @@ import uploadRouter from './routes/upload.routes.js'
 const app = express()
 
 app.disable('x-powered-by')
+app.use(helmet())
+app.use(compression())
 app.use(cors(corsOptions))
 app.use(express.json())
 app.use(cookieParser())

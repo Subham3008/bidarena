@@ -116,10 +116,11 @@ implementing mandatory scope.
 
 Protected REST routes require a principal established by authentication
 middleware. HTTP authentication uses a signed JWT in the
-`bidarena_session` cookie. The cookie is HTTP-only, uses `SameSite=Lax`, is
-scoped to `/`, and is marked `Secure` in production. The server derives
-identity from the verified JWT subject; it never accepts identity from request
-data.
+`bidarena_session` cookie. The cookie is HTTP-only, defaults to `SameSite=Lax`,
+is scoped to `/`, and is marked `Secure` in production. Production may
+explicitly use `SameSite=None` for HTTPS cross-site hosting while retaining the
+strict credentialed origin allowlist. The server derives identity from the
+verified JWT subject; it never accepts identity from request data.
 
 Regardless of that decision, these rules are fixed:
 
@@ -196,9 +197,13 @@ fields and enrich the response only after successful authentication.
 }
 ```
 
-This liveness response does not claim that MongoDB, Redis, Socket.io, Cloudinary,
-or Razorpay is ready. A dependency-readiness contract is unresolved and is not
-part of the foundation endpoint.
+This liveness response does not claim that MongoDB, Socket.io, Cloudinary, or
+Razorpay is ready.
+
+`GET /ready` reports only the required MongoDB dependency. It returns `200`
+with `database: "connected"` when Mongoose is connected, otherwise `503` with
+`database: "disconnected"`. Both responses are safe JSON without connection
+details.
 
 ## 6. HTTP status and error-code semantics
 
@@ -489,9 +494,8 @@ An empty result remains a successful response with the same pagination shape.
 - The initial contract does not expose REST bid submission. Bids use the
   authenticated Socket.io `place_bid` command and its `clientBidId` duplicate
   protection.
-- Whether auction creation and payment-order creation accept an HTTP
-  idempotency key is unresolved. Clients must not blindly retry those operations
-  until this is frozen.
+- Payment-order creation reuses the one pending order persisted for an auction.
+  Whether auction creation accepts an HTTP idempotency key remains unresolved.
 - Cache failure and provider failure must map to explicit errors or documented
   fallback behavior; they must not produce a false success envelope.
 
@@ -500,8 +504,8 @@ An empty result remains a successful response with the same pagination shape.
 The available SRS does not settle the following. They remain deliberately open
 rather than being invented in implementation:
 
-1. Refresh rotation, revocation, password recovery, CSRF hardening beyond
-   `SameSite=Lax`, and cross-site production cookie deployment.
+1. Refresh rotation, revocation, password recovery, and final CSRF hardening
+   for cross-site production cookie deployment.
 2. Whether spectators must authenticate and which auction fields are public.
 3. Monetary unit/precision, whether to adopt the proposed integer-minor-unit
    representation, and the supported/default currency.
@@ -516,9 +520,8 @@ rather than being invented in implementation:
 9. Statistics and auction-heat formulas and response shapes.
 10. Profile editing scope and seller-dashboard aggregation.
 11. Payment retry, failed-attempt, webhook, and reconciliation behavior.
-12. A dependency-readiness endpoint separate from `/health`.
-13. HTTP idempotency rules for non-bid mutations.
-14. Error-message localization and public observability/correlation metadata.
+12. HTTP idempotency rules for other non-bid mutations.
+13. Error-message localization and public observability/correlation metadata.
 
 These decisions should be added here before dependent feature work begins. They
 must not be inferred independently by the client and server.
