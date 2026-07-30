@@ -34,7 +34,10 @@ function asIsoDate(value) {
   return new Date(value).toISOString()
 }
 
-export function createAuctionTimerManager(io, { syncIntervalMs = 1_000 } = {}) {
+export function createAuctionTimerManager(
+  io,
+  { syncIntervalMs = 1_000, onLifecycleStateChanged } = {},
+) {
   const startTimers = new Map()
   const endTimers = new Map()
   const syncIntervals = new Map()
@@ -122,7 +125,19 @@ export function createAuctionTimerManager(io, { syncIntervalMs = 1_000 } = {}) {
     })
   }
 
-  function emitStarted(auction) {
+  async function notifyLifecycleStateChanged(auctionId) {
+    if (typeof onLifecycleStateChanged !== 'function') {
+      return
+    }
+
+    try {
+      await onLifecycleStateChanged(auctionId)
+    } catch {
+      // Optional realtime metrics must never retry or undo a persisted lifecycle change.
+    }
+  }
+
+  async function emitStarted(auction) {
     if (stopped) {
       return
     }
@@ -135,6 +150,7 @@ export function createAuctionTimerManager(io, { syncIntervalMs = 1_000 } = {}) {
       endAt: asIsoDate(auction.endAt),
       serverTime: Date.now(),
     })
+    await notifyLifecycleStateChanged(auctionId)
   }
 
   async function emitCompleted(auctionId) {
@@ -174,6 +190,7 @@ export function createAuctionTimerManager(io, { syncIntervalMs = 1_000 } = {}) {
         'auction_state_updated',
         authoritativeUpdate,
       )
+      await notifyLifecycleStateChanged(auctionId)
       return true
     })()
 
@@ -264,7 +281,7 @@ export function createAuctionTimerManager(io, { syncIntervalMs = 1_000 } = {}) {
         }
 
         if (result.activated) {
-          emitStarted(result.activated)
+          await emitStarted(result.activated)
         }
 
         if (result.completed) {

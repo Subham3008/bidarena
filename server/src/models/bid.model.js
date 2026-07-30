@@ -42,6 +42,7 @@ const bidSchema = new Schema({
 bidSchema.index({ auction: 1, clientBidId: 1 }, { unique: true })
 // A unique server sequence also protects deterministic ordering within each auction.
 bidSchema.index({ auction: 1, serverSequence: 1 }, { unique: true })
+bidSchema.index({ auction: 1, timestamp: -1 })
 bidSchema.index({ bidder: 1, timestamp: -1 })
 
 const Bid = mongoose.models.Bid ?? mongoose.model('Bid', bidSchema)

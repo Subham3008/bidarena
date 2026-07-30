@@ -6,11 +6,17 @@ import { connectDatabase } from './config/database.js'
 import { env } from './config/env.js'
 import { recoverAuctionLifecycle } from './services/auction-lifecycle.service.js'
 import { createAuctionTimerManager } from './services/auction-timer-manager.js'
-import { createAuctionSocketServer } from './sockets/auction-rooms.js'
+import {
+  createAuctionSocketServer,
+  publishAuctionRealtime,
+} from './sockets/auction-rooms.js'
 
 const httpServer = createServer(app)
 const io = createAuctionSocketServer(httpServer)
-const auctionTimerManager = createAuctionTimerManager(io)
+const auctionTimerManager = createAuctionTimerManager(io, {
+  onLifecycleStateChanged: (auctionId) =>
+    publishAuctionRealtime(io, auctionId),
+})
 let isShuttingDown = false
 
 async function startServer() {
