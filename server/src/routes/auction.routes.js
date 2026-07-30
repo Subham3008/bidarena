@@ -2,9 +2,11 @@ import { Router } from 'express'
 
 import {
   createAuctionController,
+  deleteAuctionController,
   discoverAuctionsController,
   discoverOwnedAuctionsController,
   getAuctionDetailsController,
+  updateAuctionController,
 } from '../controllers/auction.controller.js'
 import { requireAuthentication } from '../middleware/auth.middleware.js'
 import {
@@ -17,6 +19,7 @@ import {
   createAuctionSchema,
   discoverAuctionsSchema,
   mineAuctionsSchema,
+  updateAuctionSchema,
 } from '../validators/auction.validator.js'
 
 const auctionRouter = Router()
@@ -42,6 +45,19 @@ auctionRouter.get(
   '/:auctionId',
   validateParams(auctionParamsSchema),
   getAuctionDetailsController,
+)
+auctionRouter.patch(
+  '/:auctionId',
+  requireAuthentication,
+  validateParams(auctionParamsSchema),
+  validateBody(updateAuctionSchema),
+  updateAuctionController,
+)
+auctionRouter.delete(
+  '/:auctionId',
+  requireAuthentication,
+  validateParams(auctionParamsSchema),
+  deleteAuctionController,
 )
 
 export default auctionRouter

@@ -19,6 +19,12 @@ const auctionSchema = new Schema(
       required: true,
       trim: true,
     },
+    category: {
+      type: String,
+      trim: true,
+      maxlength: 80,
+      default: 'Other',
+    },
     image: {
       type: String,
       required: true,

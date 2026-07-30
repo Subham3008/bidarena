@@ -405,6 +405,7 @@ export function createAuctionTimerManager(
   }
 
   const manager = {
+    clearAuction,
     clearAll,
     scheduleAuction,
     schedulePersistedAuctions,
@@ -418,4 +419,14 @@ export function createAuctionTimerManager(
 
 export function scheduleAuctionLifecycle(auction) {
   activeTimerManager?.scheduleAuction(auction)
+}
+
+export function cancelAuctionLifecycle(auctionId) {
+  if (!mongoose.isObjectIdOrHexString(auctionId)) {
+    return
+  }
+
+  activeTimerManager?.clearAuction(
+    new mongoose.Types.ObjectId(auctionId).toString(),
+  )
 }

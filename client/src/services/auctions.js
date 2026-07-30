@@ -20,6 +20,36 @@ export async function createAuction(auction) {
   return response.data.data.auction
 }
 
+export async function updateAuction({ auctionId, auction }) {
+  const response = await api.patch(`/auctions/${auctionId}`, auction)
+  return response.data.data.auction
+}
+
+export async function deleteAuction(auctionId) {
+  const response = await api.delete(`/auctions/${auctionId}`)
+  return response.data.data
+}
+
+export async function uploadAuctionImage(file, { onProgress, signal } = {}) {
+  const formData = new FormData()
+  formData.append('image', file)
+
+  const response = await api.post('/uploads/auction-image', formData, {
+    signal,
+    onUploadProgress(progressEvent) {
+      if (!progressEvent.total) {
+        return
+      }
+
+      onProgress?.(
+        Math.min(100, Math.round((progressEvent.loaded / progressEvent.total) * 100)),
+      )
+    },
+  })
+
+  return response.data.data
+}
+
 export async function fetchAuction(auctionId, signal) {
   const response = await api.get(`/auctions/${auctionId}`, { signal })
   return response.data.data.auction

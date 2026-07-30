@@ -1,7 +1,10 @@
 import Auction from '../models/auction.model.js'
-import { scheduleAuctionLifecycle } from './auction-timer-manager.js'
+import Bid from '../models/bid.model.js'
+import {
+  cancelAuctionLifecycle,
+  scheduleAuctionLifecycle,
+} from './auction-timer-manager.js'
 import { AppError } from '../utils/app-error.js'
-
 
 const SORT_OPTIONS = {
   newest: { createdAt: -1, _id: -1 },
@@ -30,6 +33,7 @@ function serializeCreatedAuction(auction) {
     _id: auction._id.toString(),
     title: auction.title,
     description: auction.description,
+    category: auction.category ?? 'Other',
     image: auction.image,
     startBid: auction.startBid,
     minimumIncrement: auction.minimumIncrement,
@@ -48,6 +52,7 @@ function serializeAuctionSummary(auction) {
   return {
     _id: auction._id.toString(),
     title: auction.title,
+    category: auction.category ?? 'Other',
     image: auction.image,
     startBid: auction.startBid,
     currentBid: auction.currentBid,
@@ -64,6 +69,7 @@ function serializeAuctionDetails(auction) {
     _id: auction._id.toString(),
     title: auction.title,
     description: auction.description,
+    category: auction.category ?? 'Other',
     image: auction.image,
     startBid: auction.startBid,
     minimumIncrement: auction.minimumIncrement,
@@ -94,6 +100,7 @@ function serializeOwnedAuction(auction) {
   return {
     _id: auction._id.toString(),
     title: auction.title,
+    category: auction.category ?? 'Other',
     image: auction.image,
     status: auction.status,
     startAt: auction.startAt,
@@ -104,6 +111,7 @@ function serializeOwnedAuction(auction) {
     currentBidder: serializeParticipant(auction.currentBidder),
     winner: serializeParticipant(auction.winner),
     paymentStatus: auction.paymentStatus,
+    winningAmount: auction.winningAmount ?? null,
   }
 }
 
@@ -155,7 +163,7 @@ export async function discoverAuctions({
   const [auctions, totalItems] = await Promise.all([
     Auction.find(filter)
       .select(
-        'title image startBid currentBid startAt endAt status bidCount seller',
+        'title category image startBid currentBid startAt endAt status bidCount seller',
       )
       .sort(SORT_OPTIONS[sort])
       .skip(skip)
@@ -179,7 +187,7 @@ export async function discoverAuctions({
 export async function getAuctionDetails(auctionId) {
   const auction = await Auction.findById(auctionId)
     .select(
-      'title description image startBid minimumIncrement currentBid startAt endAt status bidCount seller createdAt updatedAt',
+      'title description category image startBid minimumIncrement currentBid startAt endAt status bidCount seller createdAt updatedAt',
     )
     .populate('seller', '_id displayName')
     .lean()
@@ -204,7 +212,7 @@ export async function discoverOwnedAuctions({ sellerId, status, page, limit }) {
     await Promise.all([
       Auction.find(filter)
         .select(
-          'title image status startAt endAt startBid currentBid bidCount currentBidder winner paymentStatus',
+          'title category image status startAt endAt startBid currentBid bidCount currentBidder winner winningAmount paymentStatus',
         )
         .sort({ createdAt: -1, _id: -1 })
         .skip(skip)
@@ -231,4 +239,201 @@ export async function discoverOwnedAuctions({ sellerId, status, page, limit }) {
       totalPages: Math.ceil(totalItems / limit),
     },
   }
+}
+
+const EDITABLE_AUCTION_FIELDS = new Set([
+  'title',
+  'description',
+  'category',
+  'image',
+  'startBid',
+  'minimumIncrement',
+  'startAt',
+  'endAt',
+])
+
+function assertOwner(auction, sellerId) {
+  if (auction.seller.toString() !== sellerId.toString()) {
+    throw new AppError(
+      403,
+      'AUCTION_FORBIDDEN',
+      'Only the auction owner may manage this auction',
+    )
+  }
+}
+
+async function assertUpcomingAuctionCanBeManaged(auction, action) {
+  const now = new Date()
+
+  if (auction.status !== 'UPCOMING' || auction.startAt <= now) {
+    throw new AppError(
+      409,
+      action === 'update' ? 'AUCTION_NOT_EDITABLE' : 'AUCTION_NOT_DELETABLE',
+      `Only upcoming auctions that have not started may be ${action === 'update' ? 'edited' : 'deleted'}`,
+    )
+  }
+
+  const acceptedBidExists =
+    auction.bidCount > 0 || Boolean(await Bid.exists({ auction: auction._id }))
+
+  if (acceptedBidExists) {
+    throw new AppError(
+      409,
+      action === 'update' ? 'AUCTION_NOT_EDITABLE' : 'AUCTION_NOT_DELETABLE',
+      `Auctions with accepted bids cannot be ${action === 'update' ? 'edited' : 'deleted'}`,
+    )
+  }
+}
+
+async function loadManagedAuction(auctionId, sellerId, action) {
+  const auction = await Auction.findById(auctionId).select(
+    '_id seller status startAt endAt bidCount version',
+  )
+
+  if (!auction) {
+    throw new AppError(404, 'AUCTION_NOT_FOUND', 'Auction not found')
+  }
+
+  assertOwner(auction, sellerId)
+  await assertUpcomingAuctionCanBeManaged(auction, action)
+  return auction
+}
+
+function assertUpdatedSchedule(auction, auctionData) {
+  const startAt = auctionData.startAt ?? auction.startAt
+  const endAt = auctionData.endAt ?? auction.endAt
+
+  if (startAt <= new Date()) {
+    throw new AppError(
+      409,
+      'AUCTION_NOT_EDITABLE',
+      'Only upcoming auctions that have not started may be edited',
+    )
+  }
+
+  if (endAt <= startAt) {
+    throw new AppError(
+      400,
+      'VALIDATION_ERROR',
+      'Request validation failed',
+      [{ field: 'endAt', message: 'End date must be later than start date' }],
+    )
+  }
+}
+
+async function explainManagementRace(auctionId, sellerId, action) {
+  const auction = await Auction.findById(auctionId).select(
+    '_id seller status startAt endAt bidCount version',
+  )
+
+  if (!auction) {
+    throw new AppError(404, 'AUCTION_NOT_FOUND', 'Auction not found')
+  }
+
+  assertOwner(auction, sellerId)
+  await assertUpcomingAuctionCanBeManaged(auction, action)
+  throw new AppError(
+    409,
+    action === 'update' ? 'AUCTION_NOT_EDITABLE' : 'AUCTION_NOT_DELETABLE',
+    'Auction state changed; refresh and try again',
+  )
+}
+
+function editableAuctionChanges(auctionData) {
+  const unsafeFields = Object.keys(auctionData).filter(
+    (field) => !EDITABLE_AUCTION_FIELDS.has(field),
+  )
+
+  if (unsafeFields.length > 0) {
+    throw new AppError(
+      400,
+      'VALIDATION_ERROR',
+      'Request validation failed',
+      unsafeFields.map((field) => ({
+        field,
+        message: 'Field cannot be updated',
+      })),
+    )
+  }
+
+  const changes = Object.fromEntries(
+    Object.entries(auctionData).filter(([field]) =>
+      EDITABLE_AUCTION_FIELDS.has(field),
+    ),
+  )
+
+  if (Object.keys(changes).length === 0) {
+    throw new AppError(
+      400,
+      'VALIDATION_ERROR',
+      'Request validation failed',
+      [{ field: '', message: 'Provide at least one auction field to update' }],
+    )
+  }
+
+  return changes
+}
+
+export async function updateAuction({ auctionId, sellerId, auctionData }) {
+  const auction = await loadManagedAuction(auctionId, sellerId, 'update')
+  const editableChanges = editableAuctionChanges(auctionData)
+  assertUpdatedSchedule(auction, editableChanges)
+  const scheduleChanged =
+    (editableChanges.startAt !== undefined &&
+      editableChanges.startAt.getTime() !== auction.startAt.getTime()) ||
+    (editableChanges.endAt !== undefined &&
+      editableChanges.endAt.getTime() !== auction.endAt.getTime())
+
+  const changes = {
+    ...editableChanges,
+    ...(editableChanges.startBid === undefined
+      ? {}
+      : { currentBid: editableChanges.startBid }),
+  }
+  const updatedAuction = await Auction.findOneAndUpdate(
+    {
+      _id: auction._id,
+      seller: sellerId,
+      status: 'UPCOMING',
+      startAt: { $gt: new Date() },
+      bidCount: 0,
+      version: auction.version,
+    },
+    { $set: changes, $inc: { version: 1 } },
+    { returnDocument: 'after', runValidators: true },
+  ).populate('seller', '_id displayName')
+
+  if (!updatedAuction) {
+    await explainManagementRace(auctionId, sellerId, 'update')
+  }
+
+  if (scheduleChanged) {
+    scheduleAuctionLifecycle(updatedAuction)
+  }
+
+  return serializeCreatedAuction(updatedAuction)
+}
+
+export async function deleteAuction({ auctionId, sellerId }) {
+  const auction = await loadManagedAuction(auctionId, sellerId, 'delete')
+
+  const deletedAuction = await Auction.findOneAndDelete(
+    {
+      _id: auction._id,
+      seller: sellerId,
+      status: 'UPCOMING',
+      startAt: { $gt: new Date() },
+      bidCount: 0,
+      version: auction.version,
+    },
+  )
+
+  if (!deletedAuction) {
+    await explainManagementRace(auctionId, sellerId, 'delete')
+  }
+
+  // The guarded deletion makes an already-running lifecycle callback inert.
+  cancelAuctionLifecycle(deletedAuction._id)
+
+  return deletedAuction._id.toString()
 }

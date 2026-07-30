@@ -1,10 +1,12 @@
-import { ArrowUpRight, CalendarClock } from 'lucide-react'
+import { ArrowUpRight, CalendarClock, UserRound } from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 
+import { getCurrencyPresentation } from '../utils/currency.js'
+
 const STATUS_LABELS = {
   UPCOMING: 'Upcoming',
-  ACTIVE: 'Live',
+  ACTIVE: 'Live now',
   COMPLETED: 'Completed',
 }
 
@@ -14,17 +16,12 @@ const STATUS_STYLES = {
   COMPLETED: 'bg-stone-100 text-stone-700 ring-stone-200',
 }
 
-const numberFormatter = new Intl.NumberFormat('en-IN', {
-  maximumFractionDigits: 2,
-})
-
-function getScheduleLabel(auction) {
-  const date = new Date(
-    auction.status === 'UPCOMING' ? auction.startAt : auction.endAt,
-  )
+function getSchedule(auction) {
+  const value = auction.status === 'UPCOMING' ? auction.startAt : auction.endAt
+  const date = new Date(value)
 
   if (Number.isNaN(date.getTime())) {
-    return 'Schedule unavailable'
+    return { label: 'Schedule unavailable', dateTime: undefined }
   }
 
   const prefix =
@@ -34,77 +31,113 @@ function getScheduleLabel(auction) {
         ? 'Ends'
         : 'Ended'
 
-  return `${prefix} ${date.toLocaleString([], {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  })}`
+  return {
+    label: `${prefix} ${date.toLocaleString([], {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    })}`,
+    dateTime: date.toISOString(),
+  }
 }
 
-export function AuctionCard({ auction }) {
-  const [imageFailed, setImageFailed] = useState(false)
-  const displayedBid = auction.currentBid ?? auction.startBid
+export function AuctionCard({ auction, className = '' }) {
+  const [failedImageUrl, setFailedImageUrl] = useState('')
+  const imageFailed = failedImageUrl === auction.image
+  const bidCount = auction.bidCount ?? 0
+  const priceLabel = bidCount > 0 ? 'Current bid' : 'Starting bid'
+  const price = getCurrencyPresentation(
+    auction.currentBid ?? auction.startBid,
+  )
+  const schedule = getSchedule(auction)
 
   return (
-    <article className="overflow-hidden rounded-md border border-stone-200 bg-white">
-      <div className="aspect-[4/3] bg-stone-100">
-        {!imageFailed ? (
+    <article
+      data-auction-card
+      className={`group flex h-full min-w-0 flex-col overflow-hidden rounded-md border border-stone-200 bg-white shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-stone-300 hover:shadow-md motion-reduce:transform-none motion-reduce:transition-none ${className}`}
+    >
+      <Link
+        to={`/auctions/${auction._id}`}
+        className="relative block aspect-[4/3] overflow-hidden bg-stone-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-700"
+        aria-label={`View ${auction.title}`}
+      >
+        {!imageFailed && auction.image ? (
           <img
             src={auction.image}
-            alt={auction.title}
-            className="h-full w-full object-cover"
+            alt=""
+            className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02] motion-reduce:transform-none motion-reduce:transition-none"
             loading="lazy"
-            onError={() => setImageFailed(true)}
+            onError={() => setFailedImageUrl(auction.image)}
           />
         ) : (
           <div className="grid h-full place-items-center px-4 text-center text-sm text-stone-500">
             Image unavailable
           </div>
         )}
-      </div>
+        <span
+          className={`absolute left-3 top-3 rounded-full px-2.5 py-1 text-xs font-semibold shadow-sm ring-1 ring-inset ${STATUS_STYLES[auction.status] ?? STATUS_STYLES.COMPLETED}`}
+        >
+          {STATUS_LABELS[auction.status] ?? auction.status}
+        </span>
+      </Link>
 
-      <div className="p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h2 className="truncate font-semibold text-stone-950">
+      <div className="flex flex-1 flex-col p-4 sm:p-5">
+        <div className="min-w-0">
+          <h2 className="line-clamp-2 min-h-12 text-base font-semibold leading-6 text-stone-950">
+            <Link
+              to={`/auctions/${auction._id}`}
+              className="rounded-sm outline-none hover:text-emerald-800 focus-visible:ring-2 focus-visible:ring-emerald-700 focus-visible:ring-offset-2"
+            >
               {auction.title}
-            </h2>
-            <p className="mt-1 truncate text-sm text-stone-500">
-              by {auction.seller?.name ?? 'BidArena seller'}
-            </p>
-          </div>
-          <span
-            className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${STATUS_STYLES[auction.status]}`}
-          >
-            {STATUS_LABELS[auction.status]}
-          </span>
-        </div>
-
-        <div className="mt-5 flex items-end justify-between gap-4">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-stone-500">
-              {auction.bidCount > 0 ? 'Current bid' : 'Starting bid'}
-            </p>
-            <p className="mt-1 text-xl font-semibold text-stone-950">
-              {numberFormatter.format(displayedBid)}
-            </p>
-          </div>
-          <p className="text-sm text-stone-500">
-            {auction.bidCount} {auction.bidCount === 1 ? 'bid' : 'bids'}
+            </Link>
+          </h2>
+          <p className="mt-1.5 flex min-w-0 items-center gap-1.5 text-sm text-stone-500">
+            <UserRound size={14} className="shrink-0" aria-hidden="true" />
+            <span className="truncate">
+              {auction.seller?.name ?? 'BidArena seller'}
+            </span>
           </p>
         </div>
 
-        <p className="mt-4 flex items-center gap-2 border-t border-stone-100 pt-4 text-sm text-stone-600">
-          <CalendarClock size={16} aria-hidden="true" />
-          {getScheduleLabel(auction)}
-        </p>
+        <div className="mt-5 flex min-w-0 items-end justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-medium uppercase tracking-wide text-stone-500">
+              {priceLabel}
+            </p>
+            <p
+              className="mt-1 min-w-0 break-words text-xl font-semibold leading-tight text-stone-950"
+              title={price.exact}
+              aria-label={`${priceLabel}: ${price.exact}`}
+            >
+              {price.display}
+            </p>
+          </div>
+          <p className="shrink-0 pb-0.5 text-sm text-stone-500">
+            {bidCount} {bidCount === 1 ? 'bid' : 'bids'}
+          </p>
+        </div>
 
-        <Link
-          to={`/auctions/${auction._id}`}
-          className="mt-4 flex w-full items-center justify-center gap-2 rounded-sm border border-stone-300 px-3 py-2 text-sm font-medium text-stone-800 transition hover:border-emerald-700 hover:text-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:ring-offset-2"
-        >
-          View auction
-          <ArrowUpRight size={16} aria-hidden="true" />
-        </Link>
+        <div className="mt-auto pt-4">
+          <p className="flex items-start gap-2 border-t border-stone-100 pt-4 text-sm leading-5 text-stone-600">
+            <CalendarClock
+              size={16}
+              className="mt-0.5 shrink-0"
+              aria-hidden="true"
+            />
+            {schedule.dateTime ? (
+              <time dateTime={schedule.dateTime}>{schedule.label}</time>
+            ) : (
+              schedule.label
+            )}
+          </p>
+
+          <Link
+            to={`/auctions/${auction._id}`}
+            className="mt-4 flex w-full items-center justify-center gap-2 rounded-sm border border-stone-300 px-3 py-2.5 text-sm font-semibold text-stone-800 transition hover:border-emerald-700 hover:text-emerald-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 focus-visible:ring-offset-2"
+          >
+            View auction
+            <ArrowUpRight size={16} aria-hidden="true" />
+          </Link>
+        </div>
       </div>
     </article>
   )
