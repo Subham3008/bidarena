@@ -3,8 +3,14 @@ import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { auctionSocket } from '../services/auction-socket.js'
 
 const ACKNOWLEDGEMENT_TIMEOUT = 5000
+const STATS_REFRESH_INTERVAL = 30_000
 const MAX_RECENT_BIDS = 20
 const MAX_TIMELINE_EVENTS = 50
+const MAX_CHAT_MESSAGES = 50
+const CHAT_ROLES = new Set(['SELLER', 'BIDDER'])
+const HEAT_LEVELS = new Set(['COLD', 'WARM', 'HOT'])
+
+export const MAX_CHAT_MESSAGE_LENGTH = 300
 
 function createClientBidId() {
   if (typeof crypto.randomUUID === 'function') {
@@ -14,12 +20,280 @@ function createClientBidId() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
+function createClientMessageId() {
+  if (typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+
+  return `chat-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
 function getId(value) {
   if (typeof value === 'string') {
     return value
   }
 
   return value?.id ?? value?._id ?? null
+}
+
+function safeSocketMessage(value, fallback) {
+  return typeof value === 'string' && value.trim()
+    ? value.trim().slice(0, 500)
+    : fallback
+}
+
+function normalizeChatMessage(message) {
+  if (!message || typeof message !== 'object') {
+    return null
+  }
+
+  const text = typeof message.text === 'string' ? message.text : ''
+
+  if (!text.trim()) {
+    return null
+  }
+
+  const sender =
+    message.sender && typeof message.sender === 'object'
+      ? message.sender
+      : {}
+  const senderId = getId(sender)
+  const senderName =
+    typeof sender.name === 'string'
+      ? sender.name.trim()
+      : typeof sender.displayName === 'string'
+        ? sender.displayName.trim()
+        : ''
+  const avatarUrl =
+    typeof sender.avatarUrl === 'string'
+      ? sender.avatarUrl
+      : typeof sender.avatar === 'string'
+        ? sender.avatar
+        : ''
+
+  return {
+    id: getId(message),
+    auctionId: getId(message.auctionId) ?? message.auctionId ?? null,
+    sender: {
+      id: senderId,
+      name: senderName || 'Participant',
+      avatarUrl,
+    },
+    text,
+    clientMessageId:
+      typeof message.clientMessageId === 'string'
+        ? message.clientMessageId
+        : null,
+    createdAt: message.createdAt ?? message.timestamp ?? null,
+  }
+}
+
+function chatMessageKey(message) {
+  if (message.id) {
+    return `id:${message.id}`
+  }
+
+  if (message.clientMessageId) {
+    return `client:${message.sender.id ?? 'unknown'}:${message.clientMessageId}`
+  }
+
+  return `legacy:${message.sender.id ?? 'unknown'}:${message.createdAt ?? ''}:${message.text}`
+}
+
+function isSameChatMessage(first, second) {
+  if (first.id && second.id && first.id === second.id) {
+    return true
+  }
+
+  return Boolean(
+    first.clientMessageId &&
+      second.clientMessageId &&
+      first.clientMessageId === second.clientMessageId &&
+      first.sender.id &&
+      first.sender.id === second.sender.id,
+  ) || (
+    !first.id &&
+    !second.id &&
+    !first.clientMessageId &&
+    !second.clientMessageId &&
+    chatMessageKey(first) === chatMessageKey(second)
+  )
+}
+
+function compareOldestChatMessage(first, second) {
+  const firstTime = new Date(first.createdAt ?? 0).getTime()
+  const secondTime = new Date(second.createdAt ?? 0).getTime()
+  const safeFirstTime = Number.isFinite(firstTime) ? firstTime : 0
+  const safeSecondTime = Number.isFinite(secondTime) ? secondTime : 0
+
+  if (safeFirstTime !== safeSecondTime) {
+    return safeFirstTime - safeSecondTime
+  }
+
+  return chatMessageKey(first).localeCompare(chatMessageKey(second))
+}
+
+function normalizeChatMessages(messages = [], auctionId) {
+  const unique = []
+
+  for (const candidate of messages) {
+    const message = normalizeChatMessage(candidate)
+
+    if (
+      !message ||
+      (message.auctionId && message.auctionId !== auctionId)
+    ) {
+      continue
+    }
+
+    const duplicateIndex = unique.findIndex((known) =>
+      isSameChatMessage(known, message),
+    )
+
+    if (duplicateIndex >= 0) {
+      const known = unique[duplicateIndex]
+      unique[duplicateIndex] = {
+        ...known,
+        ...message,
+        sender: { ...known.sender, ...message.sender },
+      }
+    } else {
+      unique.push(message)
+    }
+  }
+
+  return unique
+    .sort(compareOldestChatMessage)
+    .slice(-MAX_CHAT_MESSAGES)
+}
+
+function safeCount(value) {
+  return Number.isFinite(value) && value >= 0
+    ? Math.trunc(value)
+    : undefined
+}
+
+function safeNonNegativeNumber(value) {
+  return Number.isFinite(value) && value >= 0 ? value : undefined
+}
+
+function safeAuctionStatus(value) {
+  if (typeof value !== 'string') {
+    return undefined
+  }
+
+  const status = value.toUpperCase()
+  return ['UPCOMING', 'ACTIVE', 'COMPLETED', 'CANCELLED'].includes(status)
+    ? status
+    : undefined
+}
+
+function safeDateValue(value) {
+  if (value === null) {
+    return null
+  }
+
+  if (
+    (typeof value === 'string' || typeof value === 'number') &&
+    !Number.isNaN(new Date(value).getTime())
+  ) {
+    return value
+  }
+
+  return undefined
+}
+
+function mergeAuctionStats(current, payload) {
+  const source =
+    payload?.stats && typeof payload.stats === 'object'
+      ? payload.stats
+      : payload
+
+  if (!source || typeof source !== 'object') {
+    return current
+  }
+
+  const next = { ...(current ?? {}) }
+  const normalized = {
+    bidderCount: safeCount(
+      source.bidderCount ?? source.activeBidderCount,
+    ),
+    spectatorCount: safeCount(source.spectatorCount),
+    uniqueBidderCount: safeCount(source.uniqueBidderCount),
+    bidCount: safeCount(source.bidCount),
+    currentBid: safeNonNegativeNumber(source.currentBid),
+    bidVelocityPerMinute: safeNonNegativeNumber(
+      source.bidVelocityPerMinute ?? source.velocityPerMinute,
+    ),
+    lastBidAt: safeDateValue(source.lastBidAt),
+    status: safeAuctionStatus(source.status),
+  }
+
+  for (const [field, value] of Object.entries(normalized)) {
+    if (value !== undefined) {
+      next[field] = value
+    }
+  }
+
+  if (Number.isFinite(payload?.serverTime)) {
+    next.serverTime = payload.serverTime
+  }
+
+  return Object.keys(next).length > 0 ? next : current
+}
+
+function snapshotStats(snapshot) {
+  const latestBid = normalizeBids(snapshot?.latestBids)[0]
+
+  return {
+    stats: {
+      bidderCount: snapshot?.activeBidderCount,
+      spectatorCount: snapshot?.spectatorCount,
+      bidCount: snapshot?.auction?.bidCount,
+      currentBid: snapshot?.auction?.currentBid,
+      lastBidAt:
+        latestBid?.createdAt ?? latestBid?.timestamp,
+      status: snapshot?.auction?.status,
+    },
+    serverTime: snapshot?.serverTime,
+  }
+}
+
+function mergeAuctionHeat(current, payload) {
+  const rawHeat =
+    typeof payload?.heat === 'string'
+      ? payload.heat.toUpperCase()
+      : typeof payload?.level === 'string'
+        ? payload.level.toUpperCase()
+        : ''
+
+  if (!HEAT_LEVELS.has(rawHeat)) {
+    return current
+  }
+
+  const next = {
+    level: rawHeat,
+  }
+  const recentBidCount = safeCount(payload.recentBidCount)
+  const windowSeconds = safeCount(payload.windowSeconds)
+
+  if (recentBidCount !== undefined) {
+    next.recentBidCount = recentBidCount
+  } else if (current?.level === rawHeat && current.recentBidCount !== undefined) {
+    next.recentBidCount = current.recentBidCount
+  }
+
+  if (windowSeconds !== undefined) {
+    next.windowSeconds = windowSeconds
+  } else if (current?.level === rawHeat && current.windowSeconds !== undefined) {
+    next.windowSeconds = current.windowSeconds
+  }
+
+  if (Number.isFinite(payload.serverTime)) {
+    next.serverTime = payload.serverTime
+  }
+
+  return next
 }
 
 function compareNewestSequence(first, second, sequenceField = 'sequence') {
@@ -360,13 +634,29 @@ export function useAuctionRoom({
   isRestoringSession,
   enabled,
 }) {
+  const [roomStateAuctionId, setRoomStateAuctionId] = useState(null)
+  const [roomStateUserId, setRoomStateUserId] = useState(null)
   const [snapshot, dispatch] = useReducer(roomStateReducer, null)
   const [connectionState, setConnectionState] = useState('connecting')
   const [roomError, setRoomError] = useState('')
   const [bidError, setBidError] = useState('')
   const [isSubmittingBid, setIsSubmittingBid] = useState(false)
+  const [chatMessages, setChatMessages] = useState([])
+  const [isChatHistoryLoading, setIsChatHistoryLoading] = useState(true)
+  const [chatHistoryError, setChatHistoryError] = useState('')
+  const [chatSendError, setChatSendError] = useState('')
+  const [isSendingChat, setIsSendingChat] = useState(false)
+  const [auctionStats, setAuctionStats] = useState(null)
+  const [auctionHeat, setAuctionHeat] = useState(null)
+  const [isInsightsLoading, setIsInsightsLoading] = useState(true)
+  const [insightsError, setInsightsError] = useState('')
   const activeAuctionRef = useRef(null)
   const bidPendingRef = useRef(false)
+  const chatPendingRef = useRef(null)
+  const chatHistoryPendingRef = useRef(null)
+  const chatHistoryVersionRef = useRef(0)
+  const statsPendingRef = useRef(null)
+  const statsVersionRef = useRef(0)
   const joinedRef = useRef(false)
   const joiningRef = useRef(false)
   const reconnectingRef = useRef(false)
@@ -404,12 +694,114 @@ export function useAuctionRoom({
       })
   }, [auctionId])
 
+  const requestChatHistory = useCallback(() => {
+    if (
+      !auctionSocket.connected ||
+      !joinedRef.current ||
+      chatHistoryPendingRef.current ||
+      activeAuctionRef.current !== auctionId
+    ) {
+      return false
+    }
+
+    const requestId = Symbol('chat-history-request')
+    const responseVersion = chatHistoryVersionRef.current
+    chatHistoryPendingRef.current = requestId
+    if (responseVersion === 0) {
+      setIsChatHistoryLoading(true)
+    }
+    auctionSocket
+      .timeout(ACKNOWLEDGEMENT_TIMEOUT)
+      .emit('request_chat_history', { auctionId }, (error, result) => {
+        if (
+          activeAuctionRef.current !== auctionId ||
+          chatHistoryPendingRef.current !== requestId
+        ) {
+          return
+        }
+
+        chatHistoryPendingRef.current = null
+        setIsChatHistoryLoading(false)
+        const receivedFreshResponse =
+          chatHistoryVersionRef.current > responseVersion
+
+        if (error || !result?.success) {
+          if (!receivedFreshResponse) {
+            setChatHistoryError(
+              safeSocketMessage(
+                result?.message,
+                'Unable to refresh auction chat history',
+              ),
+            )
+          }
+        } else if (!receivedFreshResponse) {
+          setChatHistoryError(
+            'The server did not return a valid chat history response',
+          )
+        }
+      })
+
+    return true
+  }, [auctionId])
+
+  const requestAuctionStats = useCallback(() => {
+    if (
+      !auctionSocket.connected ||
+      !joinedRef.current ||
+      statsPendingRef.current ||
+      activeAuctionRef.current !== auctionId
+    ) {
+      return false
+    }
+
+    const requestId = Symbol('auction-stats-request')
+    const responseVersion = statsVersionRef.current
+    statsPendingRef.current = requestId
+    if (responseVersion === 0) {
+      setIsInsightsLoading(true)
+    }
+    auctionSocket
+      .timeout(ACKNOWLEDGEMENT_TIMEOUT)
+      .emit('request_auction_stats', { auctionId }, (error, result) => {
+        if (
+          activeAuctionRef.current !== auctionId ||
+          statsPendingRef.current !== requestId
+        ) {
+          return
+        }
+
+        statsPendingRef.current = null
+        setIsInsightsLoading(false)
+        const receivedFreshResponse =
+          statsVersionRef.current > responseVersion
+
+        if (error || !result?.success) {
+          if (!receivedFreshResponse) {
+            setInsightsError(
+              safeSocketMessage(
+                result?.message,
+                'Unable to refresh live auction insights',
+              ),
+            )
+          }
+        } else if (!receivedFreshResponse) {
+          setInsightsError(
+            'The server did not return valid live auction statistics',
+          )
+        }
+      })
+
+    return true
+  }, [auctionId])
+
   useEffect(() => {
     if (!enabled || !auctionId || isRestoringSession) {
       return undefined
     }
 
     activeAuctionRef.current = auctionId
+    setRoomStateAuctionId(auctionId)
+    setRoomStateUserId(userId ?? null)
     joinedRef.current = false
     joiningRef.current = false
     reconnectingRef.current = false
@@ -417,10 +809,24 @@ export function useAuctionRoom({
     snapshotPendingRef.current = false
     completedRef.current = false
     bidPendingRef.current = false
+    chatPendingRef.current = null
+    chatHistoryPendingRef.current = null
+    chatHistoryVersionRef.current = 0
+    statsPendingRef.current = null
+    statsVersionRef.current = 0
     dispatch({ type: 'reset' })
     setRoomError('')
     setBidError('')
     setIsSubmittingBid(false)
+    setChatMessages([])
+    setIsChatHistoryLoading(true)
+    setChatHistoryError('')
+    setChatSendError('')
+    setIsSendingChat(false)
+    setAuctionStats(null)
+    setAuctionHeat(null)
+    setIsInsightsLoading(true)
+    setInsightsError('')
     setConnectionState('connecting')
 
     const isCurrentAuction = (payload) =>
@@ -465,8 +871,86 @@ export function useAuctionRoom({
       completedRef.current = snapshotIsCompleted
       snapshotPendingRef.current = false
       dispatch({ type: 'auction_snapshot', payload: nextSnapshot })
+      setAuctionStats((current) =>
+        mergeAuctionStats(current, snapshotStats(nextSnapshot)),
+      )
       setRoomError('')
       setConnectionState('connected')
+    }
+
+    function handleChatHistory(payload) {
+      if (!isCurrentAuction(payload) || !Array.isArray(payload.messages)) {
+        return
+      }
+
+      chatHistoryVersionRef.current += 1
+      setChatMessages((current) =>
+        normalizeChatMessages(
+          [...payload.messages, ...current],
+          auctionId,
+        ),
+      )
+      setIsChatHistoryLoading(false)
+      setChatHistoryError('')
+    }
+
+    function handleChatMessage(payload) {
+      if (!isCurrentAuction(payload) || !payload.chatMessage) {
+        return
+      }
+
+      if (
+        chatPendingRef.current &&
+        payload.chatMessage.clientMessageId ===
+          chatPendingRef.current &&
+        getId(payload.chatMessage.sender) === userId
+      ) {
+        chatPendingRef.current = null
+        setIsSendingChat(false)
+      }
+
+      setChatMessages((current) =>
+        normalizeChatMessages(
+          [...current, payload.chatMessage],
+          auctionId,
+        ),
+      )
+    }
+
+    function handleChatRejected(rejection) {
+      if (
+        !chatPendingRef.current ||
+        activeAuctionRef.current !== auctionId
+      ) {
+        return
+      }
+
+      const message = safeSocketMessage(
+        rejection?.message,
+        'The chat message was not accepted',
+      )
+      chatPendingRef.current = null
+      setIsSendingChat(false)
+      setChatSendError(message)
+    }
+
+    function handleAuctionStats(payload) {
+      if (!isCurrentAuction(payload)) {
+        return
+      }
+
+      statsVersionRef.current += 1
+      setAuctionStats((current) => mergeAuctionStats(current, payload))
+      setIsInsightsLoading(false)
+      setInsightsError('')
+    }
+
+    function handleAuctionHeat(payload) {
+      if (!isCurrentAuction(payload)) {
+        return
+      }
+
+      setAuctionHeat((current) => mergeAuctionHeat(current, payload))
     }
 
     function handleBidRejected(rejection) {
@@ -573,12 +1057,22 @@ export function useAuctionRoom({
 
             if (error || !result?.success) {
               joinedRef.current = false
-              setRoomError(result?.message ?? 'Unable to join the auction room')
+              const message = safeSocketMessage(
+                result?.message,
+                'Unable to join the auction room',
+              )
+              setRoomError(message)
+              setIsChatHistoryLoading(false)
+              setChatHistoryError(message)
+              setIsInsightsLoading(false)
+              setInsightsError(message)
               setConnectionState('disconnected')
               return
             }
 
             joinedRef.current = true
+            requestChatHistory()
+            requestAuctionStats()
 
             if (reconnectingRef.current) {
               reconnectingRef.current = false
@@ -614,6 +1108,11 @@ export function useAuctionRoom({
       auction_state_updated: handleAuthoritativeUpdate,
       timeline_event_created: (payload) =>
         applyEvent('timeline_event_created', payload),
+      chat_message: handleChatMessage,
+      chat_history: handleChatHistory,
+      chat_message_rejected: handleChatRejected,
+      auction_stats_updated: handleAuctionStats,
+      auction_heat_updated: handleAuctionHeat,
     }
 
     auctionSocket.on('connect', joinRoom)
@@ -633,7 +1132,15 @@ export function useAuctionRoom({
       auctionSocket.connect()
     }
 
+    const statsRefreshInterval = window.setInterval(() => {
+      if (!completedRef.current) {
+        requestAuctionStats()
+      }
+    }, STATS_REFRESH_INTERVAL)
+
     return () => {
+      window.clearInterval(statsRefreshInterval)
+
       if (auctionSocket.connected && joinedRef.current) {
         auctionSocket.emit('leave_auction', { auctionId })
       }
@@ -649,7 +1156,6 @@ export function useAuctionRoom({
         auctionSocket.off(event, listener)
       }
 
-      auctionSocket.disconnect()
       activeAuctionRef.current = null
       joinedRef.current = false
       joiningRef.current = false
@@ -658,8 +1164,22 @@ export function useAuctionRoom({
       snapshotPendingRef.current = false
       completedRef.current = false
       bidPendingRef.current = false
+      chatPendingRef.current = null
+      chatHistoryPendingRef.current = null
+      chatHistoryVersionRef.current = 0
+      statsPendingRef.current = null
+      statsVersionRef.current = 0
+      auctionSocket.disconnect()
     }
-  }, [auctionId, enabled, isRestoringSession, requestSnapshot, userId])
+  }, [
+    auctionId,
+    enabled,
+    isRestoringSession,
+    requestAuctionStats,
+    requestChatHistory,
+    requestSnapshot,
+    userId,
+  ])
 
   const submitBid = useCallback(
     (amount) => {
@@ -729,16 +1249,124 @@ export function useAuctionRoom({
     [auctionId, requestSnapshot, snapshot],
   )
 
+  const sendChatMessage = useCallback(
+    (rawText) => {
+      const text =
+        typeof rawText === 'string' ? rawText.trim() : ''
+
+      if (!text) {
+        setChatSendError('Enter a message before sending')
+        return false
+      }
+
+      if (text.length > MAX_CHAT_MESSAGE_LENGTH) {
+        setChatSendError(
+          `Messages must be ${MAX_CHAT_MESSAGE_LENGTH} characters or fewer`,
+        )
+        return false
+      }
+
+      if (
+        chatPendingRef.current ||
+        !auctionSocket.connected ||
+        !joinedRef.current ||
+        activeAuctionRef.current !== auctionId ||
+        !userId ||
+        !snapshot ||
+        !CHAT_ROLES.has(snapshot.currentUserRole)
+      ) {
+        setChatSendError(
+          auctionSocket.connected
+            ? 'Chat is read-only for your current room role'
+            : 'Reconnect to the auction room before sending a message',
+        )
+        return false
+      }
+
+      const clientMessageId = createClientMessageId()
+      chatPendingRef.current = clientMessageId
+      setIsSendingChat(true)
+      setChatSendError('')
+
+      auctionSocket.timeout(ACKNOWLEDGEMENT_TIMEOUT).emit(
+        'send_chat_message',
+        {
+          auctionId,
+          text,
+          clientMessageId,
+        },
+        (error, result) => {
+          if (
+            activeAuctionRef.current !== auctionId ||
+            chatPendingRef.current !== clientMessageId
+          ) {
+            return
+          }
+
+          chatPendingRef.current = null
+          setIsSendingChat(false)
+
+          if (error) {
+            setChatSendError(
+              'The server did not confirm this message. Chat history is being refreshed.',
+            )
+            requestChatHistory()
+            return
+          }
+
+          if (!result?.success) {
+            setChatSendError(
+              safeSocketMessage(
+                result?.message,
+                'The chat message was not accepted',
+              ),
+            )
+          }
+
+          // Only chat_message and chat_history events update the visible log.
+        },
+      )
+
+      return true
+    },
+    [auctionId, requestChatHistory, snapshot, userId],
+  )
+
   const clearBidError = useCallback(() => setBidError(''), [])
+  const clearChatSendError = useCallback(
+    () => setChatSendError(''),
+    [],
+  )
+
+  const hasCurrentRoomState =
+    roomStateAuctionId === auctionId &&
+    roomStateUserId === (userId ?? null)
+  const currentSnapshot = hasCurrentRoomState ? snapshot : null
 
   return {
-    snapshot,
-    connectionState,
-    roomError,
-    bidError,
+    snapshot: currentSnapshot,
+    connectionState: hasCurrentRoomState
+      ? connectionState
+      : 'connecting',
+    roomError: hasCurrentRoomState ? roomError : '',
+    bidError: hasCurrentRoomState ? bidError : '',
     clearBidError,
-    isSubmittingBid,
-    isSynced: Boolean(snapshot),
+    isSubmittingBid: hasCurrentRoomState ? isSubmittingBid : false,
+    isSynced: Boolean(currentSnapshot),
     submitBid,
+    chatMessages: hasCurrentRoomState ? chatMessages : [],
+    isChatHistoryLoading:
+      !hasCurrentRoomState || isChatHistoryLoading,
+    chatHistoryError: hasCurrentRoomState ? chatHistoryError : '',
+    chatSendError: hasCurrentRoomState ? chatSendError : '',
+    clearChatSendError,
+    isSendingChat: hasCurrentRoomState ? isSendingChat : false,
+    sendChatMessage,
+    requestChatHistory,
+    auctionStats: hasCurrentRoomState ? auctionStats : null,
+    auctionHeat: hasCurrentRoomState ? auctionHeat : null,
+    isInsightsLoading: !hasCurrentRoomState || isInsightsLoading,
+    insightsError: hasCurrentRoomState ? insightsError : '',
+    requestAuctionStats,
   }
 }
