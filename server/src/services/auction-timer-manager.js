@@ -388,6 +388,7 @@ export function createAuctionTimerManager(io, { syncIntervalMs = 1_000 } = {}) {
   }
 
   const manager = {
+    clearAuction,
     clearAll,
     scheduleAuction,
     schedulePersistedAuctions,
@@ -401,4 +402,14 @@ export function createAuctionTimerManager(io, { syncIntervalMs = 1_000 } = {}) {
 
 export function scheduleAuctionLifecycle(auction) {
   activeTimerManager?.scheduleAuction(auction)
+}
+
+export function cancelAuctionLifecycle(auctionId) {
+  if (!mongoose.isObjectIdOrHexString(auctionId)) {
+    return
+  }
+
+  activeTimerManager?.clearAuction(
+    new mongoose.Types.ObjectId(auctionId).toString(),
+  )
 }

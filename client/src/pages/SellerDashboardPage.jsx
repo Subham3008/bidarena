@@ -1,11 +1,16 @@
-import { useQuery } from '@tanstack/react-query'
-import { CalendarClock, Plus } from 'lucide-react'
-import { useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { CalendarClock, Eye, Pencil, Plus, Trash2 } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { toast } from 'sonner'
 
+import { ConfirmDialog } from '../components/ConfirmDialog.jsx'
 import { MarketplaceHeader } from '../components/MarketplaceHeader.jsx'
+import { useAuctionManagementEligibility } from '../hooks/useAuctionManagementEligibility.js'
 import { useAuth } from '../hooks/useAuth.js'
-import { fetchOwnedAuctions } from '../services/auctions.js'
+import { getApiErrorMessage } from '../services/api.js'
+import { deleteAuction, fetchOwnedAuctions } from '../services/auctions.js'
+import { getCurrencyPresentation } from '../utils/currency.js'
 
 const FILTERS = [
   { label: 'All', value: '' },
@@ -22,13 +27,9 @@ const STATUS_STYLES = {
 
 const STATUS_LABELS = {
   UPCOMING: 'Upcoming',
-  ACTIVE: 'Active',
+  ACTIVE: 'Live',
   COMPLETED: 'Completed',
 }
-
-const numberFormatter = new Intl.NumberFormat('en-IN', {
-  maximumFractionDigits: 2,
-})
 
 function formatDate(value) {
   const date = new Date(value)
@@ -39,49 +40,60 @@ function formatDate(value) {
 
 function DashboardSkeleton() {
   return (
-    <div className="mt-6 grid animate-pulse gap-5 md:grid-cols-2 xl:grid-cols-3">
+    <div className="mt-6 grid animate-pulse gap-5 md:grid-cols-2 xl:grid-cols-3" aria-label="Loading your auctions">
       {Array.from({ length: 3 }, (_, index) => (
-        <div key={index} className="h-80 border border-stone-200 bg-white" />
+        <div key={index} className="h-96 border border-stone-200 bg-white" />
       ))}
     </div>
   )
 }
 
-function SellerAuctionCard({ auction }) {
-  const [imageFailed, setImageFailed] = useState(false)
+function SellerAuctionCard({ auction, onDelete }) {
+  const [failedImageUrl, setFailedImageUrl] = useState('')
+  const imageFailed = failedImageUrl === auction.image
   const displayedBid = auction.currentBid ?? auction.startBid
+  const price = getCurrencyPresentation(displayedBid)
+  const canManage = useAuctionManagementEligibility(auction)
 
   return (
-    <article className="overflow-hidden border border-stone-200 bg-white">
+    <article className="flex min-w-0 flex-col overflow-hidden border border-stone-200 bg-white">
       <div className="flex gap-4 border-b border-stone-100 p-4">
-        <div className="h-20 w-24 shrink-0 overflow-hidden bg-stone-100">
+        <div className="aspect-[4/3] w-28 shrink-0 overflow-hidden bg-stone-100">
           {!imageFailed ? (
             <img
               src={auction.image}
               alt=""
               className="h-full w-full object-cover"
-              onError={() => setImageFailed(true)}
+              onError={() => setFailedImageUrl(auction.image)}
             />
           ) : null}
         </div>
         <div className="min-w-0 flex-1">
           <span
-            className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${STATUS_STYLES[auction.status]}`}
+            className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${STATUS_STYLES[auction.status] ?? STATUS_STYLES.COMPLETED}`}
           >
-            {STATUS_LABELS[auction.status]}
+            {STATUS_LABELS[auction.status] ?? auction.status}
           </span>
-          <h2 className="mt-2 truncate font-semibold">{auction.title}</h2>
+          <h2 className="mt-2 line-clamp-2 font-semibold leading-snug">{auction.title}</h2>
+          {auction.category ? (
+            <p className="mt-1 truncate text-xs text-stone-500">
+              {auction.category}
+            </p>
+          ) : null}
         </div>
       </div>
 
-      <div className="p-4">
+      <div className="flex flex-1 flex-col p-4">
         <dl className="grid grid-cols-2 gap-4">
-          <div>
+          <div className="min-w-0">
             <dt className="text-xs uppercase tracking-wide text-stone-500">
               {auction.bidCount ? 'Current bid' : 'Starting bid'}
             </dt>
-            <dd className="mt-1 text-xl font-semibold tabular-nums">
-              {numberFormatter.format(displayedBid)}
+            <dd
+              className="mt-1 overflow-hidden text-ellipsis text-xl font-semibold tabular-nums"
+              title={price.exact}
+            >
+              {price.display}
             </dd>
           </div>
           <div>
@@ -101,24 +113,72 @@ function SellerAuctionCard({ auction }) {
         {auction.status === 'COMPLETED' ? (
           <div className="mt-4 border-t border-stone-100 pt-4 text-sm">
             <p className="text-stone-500">
-              Winner: <span className="font-medium text-stone-800">{auction.winner?.name ?? 'No winner'}</span>
+              Winner:{' '}
+              <span className="break-words font-medium text-stone-800">
+                {auction.winner?.name ?? 'No winner'}
+              </span>
             </p>
+            {auction.winningAmount != null ? (
+              <p className="mt-1 text-stone-500">
+                Winning bid:{' '}
+                <span className="font-medium text-stone-800">
+                  {getCurrencyPresentation(auction.winningAmount).display}
+                </span>
+              </p>
+            ) : null}
             <p className="mt-1 text-stone-500">
-              Payment: <span className="font-medium text-stone-800">{auction.paymentStatus}</span>
+              Payment:{' '}
+              <span className="font-medium text-stone-800">
+                {auction.paymentStatus ?? 'Pending'}
+              </span>
             </p>
           </div>
         ) : auction.currentBidder ? (
           <p className="mt-4 border-t border-stone-100 pt-4 text-sm text-stone-500">
-            Highest bidder: <span className="font-medium text-stone-800">{auction.currentBidder.name}</span>
+            Highest bidder:{' '}
+            <span className="break-words font-medium text-stone-800">
+              {auction.currentBidder.name}
+            </span>
           </p>
         ) : null}
 
-        <Link
-          to={`/auctions/${auction._id}`}
-          className="mt-5 flex w-full justify-center rounded-sm border border-stone-300 px-4 py-2 text-sm font-medium hover:border-emerald-700 hover:text-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:ring-offset-2"
-        >
-          View auction
-        </Link>
+        <div className="mt-auto pt-5">
+          <div
+            className={`grid gap-2 ${
+              canManage ? 'grid-cols-1 sm:grid-cols-3' : 'grid-cols-1'
+            }`}
+          >
+            <Link
+              to={`/auctions/${auction._id}`}
+              className="inline-flex min-w-0 items-center justify-center gap-1.5 rounded-sm border border-stone-300 px-3 py-2 text-sm font-medium hover:border-emerald-700 hover:text-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:ring-offset-2"
+            >
+              <Eye size={15} aria-hidden="true" /> View
+            </Link>
+            {canManage ? (
+              <>
+                <Link
+                  to={`/auctions/${auction._id}/edit`}
+                  className="inline-flex min-w-0 items-center justify-center gap-1.5 rounded-sm border border-stone-300 px-3 py-2 text-sm font-medium hover:border-emerald-700 hover:text-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:ring-offset-2"
+                >
+                  <Pencil size={15} aria-hidden="true" /> Edit
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => onDelete(auction)}
+                  className="inline-flex min-w-0 items-center justify-center gap-1.5 rounded-sm border border-red-200 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-700 focus:ring-offset-2"
+                >
+                  <Trash2 size={15} aria-hidden="true" /> Delete
+                </button>
+              </>
+            ) : null}
+          </div>
+          {!canManage ? (
+            <p className="mt-3 text-xs leading-5 text-stone-500">
+              Only upcoming auctions that have not started and have no bids can
+              be edited or deleted.
+            </p>
+          ) : null}
+        </div>
       </div>
     </article>
   )
@@ -126,11 +186,17 @@ function SellerAuctionCard({ auction }) {
 
 export function SellerDashboardPage() {
   const { user } = useAuth()
+  const queryClient = useQueryClient()
+  const auctionListHeadingRef = useRef(null)
   const [filters, setFilters] = useState({ status: '', page: 1, limit: 12 })
+  const [auctionToDelete, setAuctionToDelete] = useState(null)
+  const selectedAuctionCanBeManaged =
+    useAuctionManagementEligibility(auctionToDelete)
   const auctionsQuery = useQuery({
-    queryKey: ['my-auctions', filters],
+    queryKey: ['my-auctions', user.id ?? user._id, filters],
     queryFn: ({ signal }) => fetchOwnedAuctions(filters, signal),
   })
+  const deleteMutation = useMutation({ mutationFn: deleteAuction })
   const auctions = auctionsQuery.data?.auctions ?? []
   const summary = auctionsQuery.data?.summary ?? {
     total: 0,
@@ -140,21 +206,120 @@ export function SellerDashboardPage() {
   }
   const pagination = auctionsQuery.data?.pagination
 
+  useEffect(() => {
+    if (
+      auctionToDelete &&
+      !selectedAuctionCanBeManaged &&
+      !deleteMutation.isPending
+    ) {
+      setAuctionToDelete(null)
+    }
+  }, [
+    auctionToDelete,
+    deleteMutation.isPending,
+    selectedAuctionCanBeManaged,
+  ])
+
   function selectStatus(status) {
     setFilters((current) => ({ ...current, status, page: 1 }))
   }
 
+  const closeDeleteDialog = useCallback(() => {
+    if (!deleteMutation.isPending) {
+      setAuctionToDelete(null)
+    }
+  }, [deleteMutation.isPending])
+
+  async function confirmDelete() {
+    if (!auctionToDelete || deleteMutation.isPending) {
+      return
+    }
+
+    if (!selectedAuctionCanBeManaged) {
+      setAuctionToDelete(null)
+      toast.error('This auction can no longer be deleted.')
+      void queryClient.invalidateQueries({ queryKey: ['my-auctions'] })
+      return
+    }
+
+    const deletedAuction = auctionToDelete
+
+    try {
+      await deleteMutation.mutateAsync(deletedAuction._id)
+      setAuctionToDelete(null)
+      queryClient.removeQueries({ queryKey: ['auction', deletedAuction._id] })
+      queryClient.setQueriesData(
+        { queryKey: ['my-auctions'] },
+        (cachedData) => {
+          if (
+            !cachedData?.auctions?.some(
+              (auction) => auction._id === deletedAuction._id,
+            )
+          ) {
+            return cachedData
+          }
+
+          const totalItems = Math.max(
+            0,
+            (cachedData.pagination?.totalItems ?? 1) - 1,
+          )
+          const limit = cachedData.pagination?.limit ?? filters.limit
+
+          return {
+            ...cachedData,
+            auctions: cachedData.auctions.filter(
+              (auction) => auction._id !== deletedAuction._id,
+            ),
+            summary: cachedData.summary
+              ? {
+                  ...cachedData.summary,
+                  total: Math.max(0, cachedData.summary.total - 1),
+                  upcoming: Math.max(0, cachedData.summary.upcoming - 1),
+                }
+              : cachedData.summary,
+            pagination: cachedData.pagination
+              ? {
+                  ...cachedData.pagination,
+                  totalItems,
+                  totalPages: Math.ceil(totalItems / limit),
+                }
+              : cachedData.pagination,
+          }
+        },
+      )
+
+      if (auctions.length === 1 && filters.page > 1) {
+        setFilters((current) => ({ ...current, page: current.page - 1 }))
+      }
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['my-auctions'] }),
+        queryClient.invalidateQueries({ queryKey: ['auctions'] }),
+      ])
+      toast.success('Auction deleted successfully')
+    } catch (error) {
+      toast.error(
+        getApiErrorMessage(
+          error,
+          'The auction could not be deleted. Refresh and try again.',
+        ),
+      )
+    }
+  }
+
   return (
-    <div className="min-h-screen bg-stone-100 text-stone-950">
+    <div className="min-h-screen overflow-x-hidden bg-stone-100 text-stone-950">
       <MarketplaceHeader />
-      <main className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 sm:py-10 lg:px-8">
         <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-sm font-semibold text-emerald-800">Seller dashboard</p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight">
               Welcome, {user.displayName}
             </h1>
-            <p className="mt-2 text-stone-600">Manage your auction listings and review their current state.</p>
+            <p className="mt-2 text-stone-600">
+              Manage upcoming listings and review live or completed auctions.
+            </p>
           </div>
           <Link
             to="/auctions/new"
@@ -168,7 +333,7 @@ export function SellerDashboardPage() {
           {[
             ['Total auctions', summary.total],
             ['Upcoming', summary.upcoming],
-            ['Active', summary.active],
+            ['Live', summary.active],
             ['Completed', summary.completed],
           ].map(([label, value]) => (
             <div key={label} className="border border-stone-200 bg-white p-4">
@@ -180,7 +345,14 @@ export function SellerDashboardPage() {
 
         <section className="mt-10" aria-labelledby="my-auctions-title">
           <div className="flex flex-col gap-4 border-b border-stone-200 pb-5 sm:flex-row sm:items-center sm:justify-between">
-            <h2 id="my-auctions-title" className="text-xl font-semibold">My auctions</h2>
+            <h2
+              ref={auctionListHeadingRef}
+              id="my-auctions-title"
+              tabIndex="-1"
+              className="text-xl font-semibold outline-none"
+            >
+              My auctions
+            </h2>
             <div className="flex gap-2 overflow-x-auto pb-1" aria-label="Auction status filters">
               {FILTERS.map((filter) => (
                 <button
@@ -204,6 +376,7 @@ export function SellerDashboardPage() {
           {auctionsQuery.isError ? (
             <div className="mt-6 border border-red-200 bg-red-50 p-6 text-center">
               <p className="font-semibold text-red-900">Your auctions could not be loaded.</p>
+              <p className="mt-1 text-sm text-red-800">Check your connection and try again.</p>
               <button
                 type="button"
                 onClick={() => auctionsQuery.refetch()}
@@ -226,18 +399,22 @@ export function SellerDashboardPage() {
           {auctionsQuery.isSuccess && auctions.length > 0 ? (
             <div className="mt-6 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
               {auctions.map((auction) => (
-                <SellerAuctionCard key={auction._id} auction={auction} />
+                <SellerAuctionCard
+                  key={auction._id}
+                  auction={auction}
+                  onDelete={setAuctionToDelete}
+                />
               ))}
             </div>
           ) : null}
 
-          {auctionsQuery.isSuccess && pagination.totalPages > 1 ? (
+          {auctionsQuery.isSuccess && pagination?.totalPages > 1 ? (
             <nav className="mt-8 flex items-center justify-between border-t border-stone-200 pt-5" aria-label="Seller auction pages">
               <button
                 type="button"
                 disabled={pagination.page <= 1 || auctionsQuery.isFetching}
                 onClick={() => setFilters((current) => ({ ...current, page: current.page - 1 }))}
-                className="rounded-sm border border-stone-300 bg-white px-4 py-2 text-sm font-medium disabled:text-stone-400"
+                className="rounded-sm border border-stone-300 bg-white px-4 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:ring-offset-2 disabled:cursor-not-allowed disabled:text-stone-400"
               >
                 Previous
               </button>
@@ -246,7 +423,7 @@ export function SellerDashboardPage() {
                 type="button"
                 disabled={pagination.page >= pagination.totalPages || auctionsQuery.isFetching}
                 onClick={() => setFilters((current) => ({ ...current, page: current.page + 1 }))}
-                className="rounded-sm border border-stone-300 bg-white px-4 py-2 text-sm font-medium disabled:text-stone-400"
+                className="rounded-sm border border-stone-300 bg-white px-4 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:ring-offset-2 disabled:cursor-not-allowed disabled:text-stone-400"
               >
                 Next
               </button>
@@ -254,6 +431,20 @@ export function SellerDashboardPage() {
           ) : null}
         </section>
       </main>
+
+      <ConfirmDialog
+        open={Boolean(auctionToDelete && selectedAuctionCanBeManaged)}
+        title="Delete this auction?"
+        description={
+          auctionToDelete
+            ? `“${auctionToDelete.title}” will be permanently removed. This action cannot be undone.`
+            : ''
+        }
+        isConfirming={deleteMutation.isPending}
+        onCancel={closeDeleteDialog}
+        onConfirm={confirmDelete}
+        fallbackFocusRef={auctionListHeadingRef}
+      />
     </div>
   )
 }

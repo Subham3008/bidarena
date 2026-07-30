@@ -14,10 +14,10 @@ import { MarketplaceHeader } from '../components/MarketplaceHeader.jsx'
 import { useAuctionRoom } from '../hooks/useAuctionRoom.js'
 import { useAuth } from '../hooks/useAuth.js'
 import { fetchAuction } from '../services/auctions.js'
-
-const numberFormatter = new Intl.NumberFormat('en-IN', {
-  maximumFractionDigits: 2,
-})
+import {
+  formatCurrency,
+  getCurrencyPresentation,
+} from '../utils/currency.js'
 
 const STATUS_LABELS = {
   UPCOMING: 'Upcoming',
@@ -29,6 +29,49 @@ const STATUS_STYLES = {
   UPCOMING: 'bg-amber-50 text-amber-800 ring-amber-200',
   ACTIVE: 'bg-emerald-50 text-emerald-800 ring-emerald-200',
   COMPLETED: 'bg-stone-100 text-stone-700 ring-stone-200',
+}
+
+const PARTIAL_CURRENCY_PATTERN = /^\d*(?:\.\d{0,2})?$/
+const COMPLETE_CURRENCY_PATTERN = /^\d+(?:\.\d{1,2})?$/
+const BLOCKED_BID_KEYS = new Set(['e', 'E', '+', '-', ' '])
+const MOBILE_ACTIVITY_TABS = ['bids', 'timeline', 'participants']
+const MAX_SAFE_AMOUNT = BigInt(Number.MAX_SAFE_INTEGER)
+
+function parseSafeBidAmount(value) {
+  if (value.length > 19 || !COMPLETE_CURRENCY_PATTERN.test(value)) {
+    return null
+  }
+
+  const [wholePart, fractionPart = ''] = value.split('.')
+  const wholeAmount = BigInt(wholePart)
+
+  if (!fractionPart || /^0+$/.test(fractionPart)) {
+    if (wholeAmount === 0n || wholeAmount > MAX_SAFE_AMOUNT) {
+      return null
+    }
+
+    return Number(wholeAmount)
+  }
+
+  const minorUnits =
+    wholeAmount * 100n + BigInt(fractionPart.padEnd(2, '0'))
+
+  if (minorUnits === 0n || minorUnits > MAX_SAFE_AMOUNT) {
+    return null
+  }
+
+  const amount = Number(value)
+  const recoveredMinorUnits = Math.round(amount * 100)
+
+  if (
+    !Number.isFinite(amount) ||
+    !Number.isSafeInteger(recoveredMinorUnits) ||
+    BigInt(recoveredMinorUnits) !== minorUnits
+  ) {
+    return null
+  }
+
+  return amount
 }
 
 function formatDate(value) {
@@ -118,7 +161,7 @@ function embeddedIdentity(value) {
   return {
     id: identityId(value),
     name: value.name ?? value.displayName,
-    avatar: value.avatar,
+    avatar: value.avatar ?? value.avatarUrl,
   }
 }
 
@@ -206,6 +249,7 @@ function BidList({ bids, identities }) {
       {bids.map((bid, index) => {
         const bidder = resolveIdentity(bid.bidder, identities)
         const sequence = bid.serverSequence ?? bid.sequence
+        const bidPresentation = getCurrencyPresentation(bid.amount)
 
         return (
           <li
@@ -233,8 +277,11 @@ function BidList({ bids, identities }) {
                 </p>
               </div>
             </div>
-            <p className="shrink-0 pr-2 font-semibold tabular-nums">
-              {numberFormatter.format(bid.amount)}
+            <p
+              className="max-w-[45%] shrink-0 break-words pr-2 text-right font-semibold tabular-nums"
+              title={bidPresentation.exact}
+            >
+              {bidPresentation.display}
             </p>
           </li>
         )
@@ -253,14 +300,14 @@ function timelineMessage(event, identities, auction) {
 
   if (eventType === 'BID_ACCEPTED') {
     return `${actor.name} placed a bid${
-      amount !== undefined ? ` of ${numberFormatter.format(amount)}` : ''
+      amount !== undefined ? ` of ${formatCurrency(amount)}` : ''
     }`
   }
 
   if (eventType === 'WINNER_DECLARED') {
     return `${actor.name} won the auction${
       amount !== undefined
-        ? ` with a bid of ${numberFormatter.format(amount)}`
+        ? ` with a bid of ${formatCurrency(amount)}`
         : ''
     }`
   }
@@ -275,7 +322,7 @@ function timelineMessage(event, identities, auction) {
     }
 
     return amount !== null && amount !== undefined
-      ? `The auction completed at ${numberFormatter.format(amount)}`
+      ? `The auction completed at ${formatCurrency(amount)}`
       : 'The auction ended with no bids'
   }
 
@@ -381,7 +428,7 @@ function ParticipantPanel({
 export function AuctionDetailsPage() {
   const { auctionId } = useParams()
   const { user, isRestoringSession } = useAuth()
-  const [imageFailed, setImageFailed] = useState(false)
+  const [failedImageUrl, setFailedImageUrl] = useState('')
   const [bidAmount, setBidAmount] = useState('')
   const [inputError, setInputError] = useState('')
   const [mobileTab, setMobileTab] = useState('bids')
@@ -406,12 +453,17 @@ export function AuctionDetailsPage() {
         seller: restAuction.seller,
       }
     : null
+  const imageFailed = failedImageUrl === auction?.image
   const remainingTime = useServerCountdown(
     auction?.endAt,
     room.snapshot?.serverTime,
   )
   const currentBid = auction?.currentBid ?? auction?.startBid ?? 0
   const minimumNextBid = currentBid + (auction?.minimumIncrement ?? 0)
+  const currentBidPresentation = getCurrencyPresentation(currentBid)
+  const winningBidPresentation = getCurrencyPresentation(
+    auction?.winningAmount,
+  )
   const identities = createIdentityMap({
     user,
     seller: auction?.seller,
@@ -440,16 +492,69 @@ export function AuctionDetailsPage() {
 
   function handleBidSubmit(event) {
     event.preventDefault()
-    const amount = Number(bidAmount)
+    const amount = parseSafeBidAmount(bidAmount)
 
-    if (!Number.isFinite(amount) || amount <= 0) {
-      setInputError('Enter a valid positive bid amount')
+    if (amount === null) {
+      setInputError(
+        'Enter a positive, safe amount using up to two decimal places',
+      )
       return
     }
 
     setInputError('')
     room.clearBidError()
     room.submitBid(amount)
+  }
+
+  function handleBidChange(event) {
+    const nextValue = event.target.value
+
+    room.clearBidError()
+
+    if (nextValue === '' || PARTIAL_CURRENCY_PATTERN.test(nextValue)) {
+      setBidAmount(nextValue)
+      setInputError('')
+      return
+    }
+
+    setInputError('Use digits and no more than two decimal places')
+  }
+
+  function handleBidKeyDown(event) {
+    if (
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey &&
+      BLOCKED_BID_KEYS.has(event.key)
+    ) {
+      event.preventDefault()
+      setInputError('Scientific notation and signed values are not allowed')
+    }
+  }
+
+  function handleMobileTabKeyDown(event) {
+    const tabButtons = Array.from(
+      event.currentTarget.parentElement.querySelectorAll('[role="tab"]'),
+    )
+    const currentIndex = tabButtons.indexOf(event.currentTarget)
+    let nextIndex
+
+    if (event.key === 'ArrowRight') {
+      nextIndex = (currentIndex + 1) % tabButtons.length
+    } else if (event.key === 'ArrowLeft') {
+      nextIndex = (currentIndex - 1 + tabButtons.length) % tabButtons.length
+    } else if (event.key === 'Home') {
+      nextIndex = 0
+    } else if (event.key === 'End') {
+      nextIndex = tabButtons.length - 1
+    } else {
+      return
+    }
+
+    event.preventDefault()
+    const nextTab = tabButtons[nextIndex]
+    setMobileTab(nextTab.dataset.activityTab)
+    nextTab.focus()
   }
 
   if (auctionQuery.isPending) {
@@ -519,7 +624,7 @@ export function AuctionDetailsPage() {
                 : ''
 
   return (
-    <div className="min-h-screen bg-stone-100 text-stone-950">
+    <div className="min-h-screen overflow-x-hidden bg-stone-100 text-stone-950">
       <MarketplaceHeader />
       <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         <Link
@@ -543,7 +648,7 @@ export function AuctionDetailsPage() {
                   src={auction.image}
                   alt={auction.title}
                   className="h-full w-full object-cover"
-                  onError={() => setImageFailed(true)}
+                  onError={() => setFailedImageUrl(auction.image)}
                 />
               ) : (
                 <div className="grid h-full place-items-center text-sm text-stone-500">
@@ -552,13 +657,18 @@ export function AuctionDetailsPage() {
               )}
             </div>
 
+            {auction.category ? (
+              <p className="mt-6 text-xs font-semibold uppercase tracking-[0.16em] text-emerald-800">
+                {auction.category}
+              </p>
+            ) : null}
             <h1
               id="auction-title"
-              className="mt-6 text-3xl font-semibold tracking-tight"
+              className={`${auction.category ? 'mt-2' : 'mt-6'} break-words text-3xl font-semibold tracking-tight`}
             >
               {auction.title}
             </h1>
-            <p className="mt-3 whitespace-pre-wrap leading-7 text-stone-600">
+            <p className="mt-3 whitespace-pre-wrap break-words leading-7 text-stone-600">
               {auction.description}
             </p>
 
@@ -566,7 +676,7 @@ export function AuctionDetailsPage() {
               <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">
                 Seller
               </p>
-              <p className="mt-2 font-semibold">
+              <p className="mt-2 break-words font-semibold">
                 {auction.seller?.name ?? 'BidArena seller'}
               </p>
             </div>
@@ -576,13 +686,17 @@ export function AuctionDetailsPage() {
                 <dt className="flex items-center gap-2 text-stone-500">
                   <CalendarDays size={16} aria-hidden="true" /> Starts
                 </dt>
-                <dd className="text-right font-medium">{formatDate(auction.startAt)}</dd>
+                <dd className="min-w-0 break-words text-right font-medium">
+                  {formatDate(auction.startAt)}
+                </dd>
               </div>
               <div className="flex items-start justify-between gap-4">
                 <dt className="flex items-center gap-2 text-stone-500">
                   <CalendarDays size={16} aria-hidden="true" /> Ends
                 </dt>
-                <dd className="text-right font-medium">{formatDate(auction.endAt)}</dd>
+                <dd className="min-w-0 break-words text-right font-medium">
+                  {formatDate(auction.endAt)}
+                </dd>
               </div>
             </dl>
           </section>
@@ -609,17 +723,20 @@ export function AuctionDetailsPage() {
                 </span>
               </div>
 
-              <div className="mt-8 grid gap-6 sm:grid-cols-2">
-                <div>
+              <div className="mt-8 grid min-w-0 gap-6 sm:grid-cols-2">
+                <div className="min-w-0">
                   <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">
                     Current highest bid
                   </p>
-                  <p className="mt-2 text-4xl font-semibold tracking-tight tabular-nums">
-                    {numberFormatter.format(currentBid)}
+                  <p
+                    className="mt-2 max-w-full break-words text-[clamp(1.75rem,7vw,2.25rem)] font-semibold leading-tight tracking-tight tabular-nums"
+                    title={currentBidPresentation.exact}
+                  >
+                    {currentBidPresentation.display}
                   </p>
                   {auction.status !== 'COMPLETED' ? (
                     <p className="mt-2 text-sm text-stone-500">
-                      Minimum next bid: {numberFormatter.format(minimumNextBid)}
+                      Minimum next bid: {formatCurrency(minimumNextBid)}
                     </p>
                   ) : null}
                   {auction.currentBidder ? (
@@ -637,7 +754,7 @@ export function AuctionDetailsPage() {
                     </div>
                   ) : null}
                 </div>
-                <div className="sm:text-right">
+                <div className="min-w-0 sm:text-right">
                   <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">
                     {auction.status === 'COMPLETED'
                       ? 'Auction ended'
@@ -678,7 +795,11 @@ export function AuctionDetailsPage() {
                           Winning bid:{' '}
                           {auction.winningAmount !== null &&
                           auction.winningAmount !== undefined
-                            ? numberFormatter.format(auction.winningAmount)
+                            ? (
+                                <span title={winningBidPresentation.exact}>
+                                  {winningBidPresentation.display}
+                                </span>
+                              )
                             : 'Unavailable'}
                         </p>
                       </div>
@@ -705,25 +826,33 @@ export function AuctionDetailsPage() {
                 </section>
               ) : null}
 
-              <form onSubmit={handleBidSubmit} className="mt-8 border-t border-stone-200 pt-6">
+              <form
+                onSubmit={handleBidSubmit}
+                className="mt-8 border-t border-stone-200 pt-6"
+                noValidate
+              >
                 <label className="block text-sm font-medium" htmlFor="bid-amount">
                   Your bid
                 </label>
                 <div className="mt-2 flex flex-col gap-3 sm:flex-row">
                   <input
                     id="bid-amount"
-                    type="number"
-                    min="0.01"
-                    step="0.01"
+                    type="text"
                     inputMode="decimal"
+                    autoComplete="off"
+                    maxLength={19}
+                    pattern="[0-9]+([.][0-9]{1,2})?"
                     value={bidAmount}
+                    aria-invalid={Boolean(inputError || room.bidError)}
+                    aria-describedby={
+                      inputError || room.bidError || readOnlyReason
+                        ? 'bid-feedback'
+                        : undefined
+                    }
                     disabled={!canBid || room.isSubmittingBid}
                     placeholder={String(minimumNextBid)}
-                    onChange={(event) => {
-                      setBidAmount(event.target.value)
-                      setInputError('')
-                      room.clearBidError()
-                    }}
+                    onChange={handleBidChange}
+                    onKeyDown={handleBidKeyDown}
                     className="min-w-0 flex-1 rounded-sm border border-stone-300 px-3 py-2.5 outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/20 disabled:bg-stone-100"
                   />
                   <button
@@ -735,11 +864,20 @@ export function AuctionDetailsPage() {
                   </button>
                 </div>
                 {inputError || room.bidError ? (
-                  <p className="mt-3 text-sm text-red-700" role="alert">
+                  <p
+                    id="bid-feedback"
+                    className="mt-3 text-sm text-red-700"
+                    role="alert"
+                  >
                     {inputError || room.bidError}
                   </p>
                 ) : readOnlyReason ? (
-                  <p className="mt-3 text-sm text-stone-500">{readOnlyReason}</p>
+                  <p
+                    id="bid-feedback"
+                    className="mt-3 text-sm text-stone-500"
+                  >
+                    {readOnlyReason}
+                  </p>
                 ) : null}
               </form>
             </div>
@@ -778,14 +916,23 @@ export function AuctionDetailsPage() {
           </aside>
 
           <section className="lg:hidden lg:col-span-12" aria-label="Auction activity">
-            <div className="flex border-b border-stone-300" role="tablist">
-              {['bids', 'timeline', 'participants'].map((tab) => (
+            <div
+              className="flex border-b border-stone-300"
+              role="tablist"
+              aria-orientation="horizontal"
+            >
+              {MOBILE_ACTIVITY_TABS.map((tab) => (
                 <button
                   key={tab}
+                  id={`mobile-auction-activity-tab-${tab}`}
                   type="button"
                   role="tab"
                   aria-selected={mobileTab === tab}
+                  aria-controls="mobile-auction-activity-panel"
+                  tabIndex={mobileTab === tab ? 0 : -1}
+                  data-activity-tab={tab}
                   onClick={() => setMobileTab(tab)}
+                  onKeyDown={handleMobileTabKeyDown}
                   className={`flex-1 border-b-2 px-2 py-3 text-sm font-medium capitalize focus:outline-none focus:ring-2 focus:ring-inset focus:ring-emerald-700 ${
                     mobileTab === tab
                       ? 'border-emerald-700 text-emerald-800'
@@ -796,7 +943,13 @@ export function AuctionDetailsPage() {
                 </button>
               ))}
             </div>
-            <div className="border border-t-0 border-stone-200 bg-white p-5">
+            <div
+              id="mobile-auction-activity-panel"
+              role="tabpanel"
+              aria-labelledby={`mobile-auction-activity-tab-${mobileTab}`}
+              tabIndex="0"
+              className="border border-t-0 border-stone-200 bg-white p-5 outline-none focus:ring-2 focus:ring-inset focus:ring-emerald-700"
+            >
               {mobileTab === 'bids' ? (
                 <BidList
                   bids={room.snapshot?.latestBids}

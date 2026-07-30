@@ -3,7 +3,8 @@
 > **Contract status:** Living contract.
 >
 > **Implemented now:** health/readiness, HTTP authentication, auction creation,
-> discovery, public auction details, profile editing, and seller-owned auctions.
+> discovery, public auction details, seller auction management, protected image
+> uploads, profile editing, and seller-owned auctions.
 >
 > Payment, bidding, and chat routes remain planned. Socket.io
 > auction rooms and snapshots are implemented.
@@ -18,8 +19,8 @@ authorization, persistence, and tests are complete.
 - Product HTTP routes use the `/api` prefix.
 - The infrastructure health check remains unversioned at `/health`.
 - JSON request and response fields use `camelCase`.
-- Request and response bodies use `application/json`, except for an image upload
-  mechanism if one is selected later.
+- Request and response bodies use `application/json`, except
+  `POST /api/uploads/auction-image`, which uses `multipart/form-data`.
 - Breaking changes require a new API version or an explicitly coordinated
   client/server migration.
 - Live bidding and room chat are Socket.io commands, not REST operations, in the
@@ -36,7 +37,9 @@ authorization, persistence, and tests are complete.
 | `GET /api/auctions` | Implemented | Public discovery, filtering, sorting, and pagination. |
 | `POST /api/auctions` | Implemented | Authenticated auction creation. |
 | `GET /api/auctions/:auctionId` | Implemented | Public auction details with a safe seller summary. |
-| `/api/auctions/:auctionId/*` | Planned | History, recovery, and payment. |
+| `PATCH/DELETE /api/auctions/:auctionId` | Implemented | Owner-only management of eligible upcoming auctions. |
+| `POST /api/uploads/auction-image` | Implemented | Protected JPEG, PNG, or WebP upload, maximum 5 MB. |
+| `/api/auctions/:auctionId/*` | Planned | History, recovery, and payment subresources. |
 | `GET/PATCH /api/auth/me` | Implemented | Current-user profile read and safe profile updates. |
 | `GET /api/auctions/mine` | Implemented | Authenticated seller listings, status filters, counts, and pagination. |
 
@@ -276,6 +279,9 @@ bid-history, and timeline routes remain planned.
 | `GET` | `/api/auctions` | None | Discover auctions with filters, sorting, and pagination. | `200` |
 | `POST` | `/api/auctions` | Required | Create an auction owned by the current user. | `201` |
 | `GET` | `/api/auctions/:auctionId` | None | Get public auction details and a safe seller summary. | `200` |
+| `PATCH` | `/api/auctions/:auctionId` | Required | Update an eligible auction owned by the current user. | `200` |
+| `DELETE` | `/api/auctions/:auctionId` | Required | Delete an eligible auction owned by the current user. | `200` |
+| `POST` | `/api/uploads/auction-image` | Required | Upload one auction image using multipart field `image`. | `201` |
 | `GET` | `/api/auctions/:auctionId/snapshot` | Optional | Fetch authoritative recovery state outside Socket.io. | `200` |
 | `GET` | `/api/auctions/:auctionId/bids` | Optional | Read persisted bid history. | `200` |
 | `GET` | `/api/auctions/:auctionId/timeline` | Optional | Read persisted auction timeline entries. | `200` |
@@ -290,6 +296,7 @@ Representative create request:
 {
   "title": "Mechanical Keyboard",
   "description": "Seller-provided auction description",
+  "category": "Electronics",
   "image": "https://example.invalid/image.jpg",
   "startBid": 100000,
   "minimumIncrement": 5000,
@@ -298,8 +305,26 @@ Representative create request:
 }
 ```
 
-The sprint accepts a validated image URL. Upload transport and image lifecycle
-remain future work.
+Create and update requests store a validated HTTPS image URL. Clients obtain
+that URL by sending one JPEG, PNG, or WebP file (maximum 5 MB) as the `image`
+field of `multipart/form-data` to `POST /api/uploads/auction-image`. The server
+returns `data.url` and `data.publicId`; clients never receive Cloudinary secrets
+and must not set the multipart boundary manually.
+
+`PATCH /api/auctions/:auctionId` accepts a strict, non-empty subset of `title`,
+`description`, `category`, `image`, `startBid`, `minimumIncrement`, `startAt`,
+and `endAt`. Unknown or authoritative fields are validation errors. The server
+derives the seller from the session and permits changes only while the auction
+is `UPCOMING`, its start time is still in the future, and it has no accepted
+bids. A changed schedule replaces the existing lifecycle schedule. Changing
+`startBid` also resets the server-owned `currentBid`, which is safe because an
+editable auction cannot have accepted bids.
+
+`DELETE /api/auctions/:auctionId` uses the same ownership and lifecycle guards,
+requires `bidCount` to be zero and no persisted accepted bids, and cancels the
+auction's scheduled lifecycle work after a guarded atomic removal. Missing
+auctions return `404`, non-owners receive `403`, and lifecycle conflicts receive
+`409`.
 
 Representative auction projection:
 
@@ -308,6 +333,7 @@ Representative auction projection:
   "_id": "auction_opaque_id",
   "title": "Mechanical Keyboard",
   "description": "Seller-provided auction description",
+  "category": "Electronics",
   "image": "https://example.invalid/image.jpg",
   "seller": {
     "_id": "user_opaque_id",
@@ -460,7 +486,8 @@ rather than being invented in implementation:
 2. Whether spectators must authenticate and which auction fields are public.
 3. Monetary unit/precision, whether to adopt the proposed integer-minor-unit
    representation, and the supported/default currency.
-4. Auction image upload route, limits, and Cloudinary reference lifecycle.
+4. Cloudinary reference cleanup when an uploaded image is replaced or its
+   auction is deleted.
 5. Additional auction creation constraints and the future minimum-next-bid
    formula.
 6. Discovery options beyond title search, the four implemented sort modes, and

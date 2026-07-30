@@ -198,6 +198,10 @@ function auctionFields(payload) {
   return update
 }
 
+function payloadSequence(payload, fallback) {
+  return Number(payload.sequence ?? payload.auction?.sequence ?? fallback)
+}
+
 function applyAuthoritativeState(state, eventType, payload) {
   if (eventType === 'reset') {
     return null
@@ -272,7 +276,11 @@ function applyAuthoritativeState(state, eventType, payload) {
       metadata: { finalBid: payload.winningAmount },
       timestamp,
     }
-    const winnerEvent = payload.winner
+    const authoritativeTimelineEvent = payload.timelineEvent
+    const authoritativeEventType =
+      authoritativeTimelineEvent?.eventType ??
+      authoritativeTimelineEvent?.type
+    const winnerEvent = authoritativeTimelineEvent ?? (payload.winner
       ? {
           id: `winner:${payload.auctionId}`,
           eventType: 'WINNER_DECLARED',
@@ -280,7 +288,7 @@ function applyAuthoritativeState(state, eventType, payload) {
           metadata: { winningBid: payload.winningAmount },
           timestamp,
         }
-      : null
+      : null)
 
     return {
       ...state,
@@ -288,7 +296,9 @@ function applyAuthoritativeState(state, eventType, payload) {
       auction: { ...state.auction, ...auctionFields(payload) },
       timeline: normalizeTimeline([
         ...(winnerEvent ? [winnerEvent] : []),
-        completionEvent,
+        ...(authoritativeEventType === 'AUCTION_COMPLETED'
+          ? []
+          : [completionEvent]),
         ...(state.timeline ?? []),
       ]),
     }
@@ -307,7 +317,7 @@ function applyAuthoritativeState(state, eventType, payload) {
 
   if (eventType === 'auction_state_updated') {
     const currentSequence = Number(state.auction?.sequence ?? 0)
-    const incomingSequence = Number(payload.sequence ?? currentSequence)
+    const incomingSequence = payloadSequence(payload, currentSequence)
 
     if (incomingSequence < currentSequence) {
       return { ...state, serverTime }
@@ -406,9 +416,11 @@ export function useAuctionRoom({
     sequenceRef.current = null
     snapshotPendingRef.current = false
     completedRef.current = false
+    bidPendingRef.current = false
     dispatch({ type: 'reset' })
     setRoomError('')
     setBidError('')
+    setIsSubmittingBid(false)
     setConnectionState('connecting')
 
     const isCurrentAuction = (payload) =>
@@ -487,14 +499,24 @@ export function useAuctionRoom({
         return
       }
 
-      const incomingSequence = Number(payload.sequence)
+      const incomingSequence = payloadSequence(payload, Number.NaN)
       const currentSequence = sequenceRef.current
+      const incomingStatus = payload.auction?.status ?? payload.status
+      const completesLifecycle =
+        incomingStatus === 'COMPLETED' && !completedRef.current
+
+      if (completedRef.current && incomingStatus !== 'COMPLETED') {
+        return
+      }
 
       if (
         Number.isFinite(incomingSequence) &&
         Number.isFinite(currentSequence)
       ) {
-        if (incomingSequence <= currentSequence) {
+        if (
+          incomingSequence < currentSequence ||
+          (incomingSequence === currentSequence && !completesLifecycle)
+        ) {
           return
         }
 
@@ -508,6 +530,14 @@ export function useAuctionRoom({
       sequenceRef.current = Number.isFinite(incomingSequence)
         ? incomingSequence
         : currentSequence
+
+      if (incomingStatus === 'COMPLETED') {
+        bidPendingRef.current = false
+        completedRef.current = true
+        setIsSubmittingBid(false)
+        setBidError('')
+      }
+
       dispatch({ type: 'auction_state_updated', payload })
     }
 
