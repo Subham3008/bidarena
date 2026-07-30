@@ -13,6 +13,7 @@ import {
   AuctionHeatBadge,
   AuctionInsightsPanel,
 } from '../components/AuctionRoomPanels.jsx'
+import { AuctionPaymentCard } from '../components/AuctionPaymentCard.jsx'
 import { MarketplaceHeader } from '../components/MarketplaceHeader.jsx'
 import { useAuctionRoom } from '../hooks/useAuctionRoom.js'
 import { useAuth } from '../hooks/useAuth.js'
@@ -804,6 +805,17 @@ export function AuctionDetailsPage() {
                   )}
                 </section>
               ) : null}
+
+              <AuctionPaymentCard
+                key={`${auctionId}:${user?.id ?? 'anonymous'}`}
+                auctionId={auctionId}
+                auction={auction}
+                user={user}
+                isRestoringSession={isRestoringSession}
+                socketPaymentStatus={
+                  room.snapshot?.auction?.paymentStatus
+                }
+              />
 
               <form
                 onSubmit={handleBidSubmit}

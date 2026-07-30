@@ -460,6 +460,7 @@ function auctionFields(payload) {
     'winningAmount',
     'startAt',
     'endAt',
+    'paymentStatus',
   ]
   const update = { ...(payload.auction ?? {}) }
 
@@ -470,6 +471,14 @@ function auctionFields(payload) {
   }
 
   return update
+}
+
+function normalizedPaymentStatus(value) {
+  return value === 'PENDING' ||
+    value === 'SUCCESSFUL' ||
+    value === 'FAILED'
+    ? value
+    : null
 }
 
 function payloadSequence(payload, fallback) {
@@ -586,6 +595,28 @@ function applyAuthoritativeState(state, eventType, payload) {
         state.timeline,
         payload.timelineEvent ?? payload.event,
       ),
+    }
+  }
+
+  if (eventType === 'payment_status_updated') {
+    const currentStatus = normalizedPaymentStatus(
+      state.auction?.paymentStatus,
+    )
+    const incomingStatus = normalizedPaymentStatus(
+      payload.paymentStatus,
+    )
+    const paymentStatus =
+      currentStatus === 'SUCCESSFUL'
+        ? currentStatus
+        : incomingStatus ?? currentStatus
+
+    return {
+      ...state,
+      serverTime,
+      auction: {
+        ...state.auction,
+        ...(paymentStatus ? { paymentStatus } : {}),
+      },
     }
   }
 
@@ -1108,6 +1139,8 @@ export function useAuctionRoom({
       auction_state_updated: handleAuthoritativeUpdate,
       timeline_event_created: (payload) =>
         applyEvent('timeline_event_created', payload),
+      payment_status_updated: (payload) =>
+        applyEvent('payment_status_updated', payload),
       chat_message: handleChatMessage,
       chat_history: handleChatHistory,
       chat_message_rejected: handleChatRejected,
