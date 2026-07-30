@@ -9,6 +9,9 @@ const MAX_TIMELINE_EVENTS = 50
 const MAX_CHAT_MESSAGES = 50
 const CHAT_ROLES = new Set(['SELLER', 'BIDDER'])
 const HEAT_LEVELS = new Set(['COLD', 'WARM', 'HOT'])
+const COMPLETED_CHAT_REJECTION_CODE = 'AUCTION_COMPLETED_READ_ONLY'
+const COMPLETED_CHAT_READ_ONLY_MESSAGE =
+  'Auction ended. Chat is now read-only.'
 
 export const MAX_CHAT_MESSAGE_LENGTH = 300
 
@@ -677,6 +680,7 @@ export function useAuctionRoom({
   const [chatHistoryError, setChatHistoryError] = useState('')
   const [chatSendError, setChatSendError] = useState('')
   const [isSendingChat, setIsSendingChat] = useState(false)
+  const [isChatReadOnly, setIsChatReadOnly] = useState(false)
   const [auctionStats, setAuctionStats] = useState(null)
   const [auctionHeat, setAuctionHeat] = useState(null)
   const [isInsightsLoading, setIsInsightsLoading] = useState(true)
@@ -684,6 +688,7 @@ export function useAuctionRoom({
   const activeAuctionRef = useRef(null)
   const bidPendingRef = useRef(false)
   const chatPendingRef = useRef(null)
+  const chatReadOnlyRef = useRef(false)
   const chatHistoryPendingRef = useRef(null)
   const chatHistoryVersionRef = useRef(0)
   const statsPendingRef = useRef(null)
@@ -841,6 +846,7 @@ export function useAuctionRoom({
     completedRef.current = false
     bidPendingRef.current = false
     chatPendingRef.current = null
+    chatReadOnlyRef.current = false
     chatHistoryPendingRef.current = null
     chatHistoryVersionRef.current = 0
     statsPendingRef.current = null
@@ -854,6 +860,7 @@ export function useAuctionRoom({
     setChatHistoryError('')
     setChatSendError('')
     setIsSendingChat(false)
+    setIsChatReadOnly(false)
     setAuctionStats(null)
     setAuctionHeat(null)
     setIsInsightsLoading(true)
@@ -950,9 +957,22 @@ export function useAuctionRoom({
 
     function handleChatRejected(rejection) {
       if (
-        !chatPendingRef.current ||
-        activeAuctionRef.current !== auctionId
+        activeAuctionRef.current !== auctionId ||
+        (rejection?.auctionId && rejection.auctionId !== auctionId)
       ) {
+        return
+      }
+
+      if (rejection?.code === COMPLETED_CHAT_REJECTION_CODE) {
+        chatPendingRef.current = null
+        chatReadOnlyRef.current = true
+        setIsSendingChat(false)
+        setIsChatReadOnly(true)
+        setChatSendError(COMPLETED_CHAT_READ_ONLY_MESSAGE)
+        return
+      }
+
+      if (!chatPendingRef.current) {
         return
       }
 
@@ -1287,6 +1307,16 @@ export function useAuctionRoom({
       const text =
         typeof rawText === 'string' ? rawText.trim() : ''
 
+      if (
+        chatReadOnlyRef.current ||
+        snapshot?.auction?.status === 'COMPLETED'
+      ) {
+        chatReadOnlyRef.current = true
+        setIsChatReadOnly(true)
+        setChatSendError(COMPLETED_CHAT_READ_ONLY_MESSAGE)
+        return false
+      }
+
       if (!text) {
         setChatSendError('Enter a message before sending')
         return false
@@ -1348,6 +1378,13 @@ export function useAuctionRoom({
           }
 
           if (!result?.success) {
+            if (result?.code === COMPLETED_CHAT_REJECTION_CODE) {
+              chatReadOnlyRef.current = true
+              setIsChatReadOnly(true)
+              setChatSendError(COMPLETED_CHAT_READ_ONLY_MESSAGE)
+              return
+            }
+
             setChatSendError(
               safeSocketMessage(
                 result?.message,
@@ -1394,6 +1431,7 @@ export function useAuctionRoom({
     chatSendError: hasCurrentRoomState ? chatSendError : '',
     clearChatSendError,
     isSendingChat: hasCurrentRoomState ? isSendingChat : false,
+    isChatReadOnly: hasCurrentRoomState ? isChatReadOnly : false,
     sendChatMessage,
     requestChatHistory,
     auctionStats: hasCurrentRoomState ? auctionStats : null,

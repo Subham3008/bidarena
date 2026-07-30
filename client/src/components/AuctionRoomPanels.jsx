@@ -190,6 +190,7 @@ export function AuctionChatPanel({
   role,
   isAuthenticated,
   auctionStatus,
+  isChatReadOnly = false,
   currentUserId,
   sellerId,
   isSelected,
@@ -206,7 +207,10 @@ export function AuctionChatPanel({
   const textareaId = useId()
   const feedbackId = `${textareaId}-feedback`
   const characterCountId = `${textareaId}-count`
-  const canWrite = isAuthenticated && CHAT_ROLES.has(role)
+  const hasChatAccess = isAuthenticated && CHAT_ROLES.has(role)
+  const isCompletedReadOnly =
+    auctionStatus === 'COMPLETED' || isChatReadOnly
+  const canWrite = hasChatAccess && !isCompletedReadOnly
   const trimmedDraft = draft.trim()
   const characterCount = trimmedDraft.length
   const showCharacterCount =
@@ -317,6 +321,10 @@ export function AuctionChatPanel({
   function handleSubmit(event) {
     event.preventDefault()
 
+    if (isCompletedReadOnly) {
+      return
+    }
+
     if (!trimmedDraft) {
       setLocalError('Enter a message before sending')
       return
@@ -336,6 +344,13 @@ export function AuctionChatPanel({
   }
 
   function handleComposerKeyDown(event) {
+    if (isCompletedReadOnly) {
+      if (event.key === 'Enter') {
+        event.preventDefault()
+      }
+      return
+    }
+
     if (
       event.key !== 'Enter' ||
       event.shiftKey ||
@@ -351,13 +366,13 @@ export function AuctionChatPanel({
     }
   }
 
-  const readOnlyMessage = !isAuthenticated
+  const readOnlyMessage = !hasChatAccess
+    ? !isAuthenticated
     ? 'Only signed-in sellers and bidders can send messages. Spectators can still follow the conversation.'
-    : !CHAT_ROLES.has(role)
-      ? role === 'SPECTATOR'
-        ? 'Chat is read-only for your current room role.'
-        : 'Chat is read-only until the server provides an eligible room role.'
-      : ''
+    : role === 'SPECTATOR'
+      ? 'Chat is read-only for your current room role.'
+      : 'Chat is read-only until the server provides an eligible room role.'
+    : ''
 
   return (
     <section
@@ -555,9 +570,13 @@ export function AuctionChatPanel({
           </p>
         ) : (
           <form onSubmit={handleSubmit} noValidate>
-            {auctionStatus === 'COMPLETED' ? (
-              <p className="mb-2 text-xs text-stone-500">
-                The auction is complete; room chat remains available for your role.
+            {isCompletedReadOnly ? (
+              <p
+                id={`${textareaId}-read-only`}
+                className="mb-2 text-sm font-medium text-stone-600"
+                role="status"
+              >
+                Auction ended. Chat is now read-only.
               </p>
             ) : null}
             <label
@@ -571,7 +590,7 @@ export function AuctionChatPanel({
               rows="2"
               maxLength={MAX_CHAT_MESSAGE_LENGTH}
               value={draft}
-              disabled={isSending}
+              disabled={isSending || isCompletedReadOnly}
               placeholder={
                 isConnected
                   ? 'Write a message…'
@@ -580,6 +599,7 @@ export function AuctionChatPanel({
               aria-invalid={Boolean(localError || sendError)}
               aria-describedby={[
                 localError || sendError ? feedbackId : '',
+                isCompletedReadOnly ? `${textareaId}-read-only` : '',
                 showCharacterCount ? characterCountId : '',
               ]
                 .filter(Boolean)
@@ -605,7 +625,7 @@ export function AuctionChatPanel({
               </div>
               <button
                 type="submit"
-                disabled={!canSubmit}
+                disabled={!canSubmit || isCompletedReadOnly}
                 className="btn-primary shrink-0 px-4"
               >
                 <Send size={14} aria-hidden="true" />
